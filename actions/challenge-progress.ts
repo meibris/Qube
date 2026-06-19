@@ -7,8 +7,9 @@ import { auth } from "@clerk/nextjs/server"
 import { and, eq } from "drizzle-orm"
 import { challengeProgress, challenges, userProgress } from "@/db/schema"
 import { revalidatePath } from "next/cache"
+import { bumpStreak } from "./bump-streak"
 
-//upsert means update 
+//upsert means update
 export const upsertChallengeProgress = async (challengeId: number) => {
     const { userId } = await auth()
 
@@ -31,8 +32,6 @@ export const upsertChallengeProgress = async (challengeId: number) => {
         throw new Error("Challenge not found.")
     }
 
-    const lessonId=challenge.lessonId
-
     const existingChallengeProgress = await db.query.challengeProgress.findFirst({
         where: and(
             eq(challengeProgress.userId, userId),
@@ -53,16 +52,13 @@ export const upsertChallengeProgress = async (challengeId: number) => {
             eq(challengeProgress.id, existingChallengeProgress.id))
 
         await db.update(userProgress).set({
-            hearts: Math.min(currentUserProgress.hearts, 5), //change to .hearts + 1 if it shows a mistake
-            //TODO: (my own todo) check why is this hearts + 1? is practice like the simpler practice? not the challenge?
+            hearts: Math.min(currentUserProgress.hearts, 5),
             points: currentUserProgress.points + 5,
         }).where(eq(userProgress.userId, userId))
 
-        revalidatePath("/learn")
+        await bumpStreak()
         revalidatePath("/lesson")
-        revalidatePath("/quests")
-        revalidatePath("/leaderboard")
-        revalidatePath(`/lesson/${lessonId}`)
+        revalidatePath("/learn")
         return
     }
 
@@ -76,9 +72,7 @@ export const upsertChallengeProgress = async (challengeId: number) => {
         points: currentUserProgress.points + 5,
     }).where(eq(userProgress.userId, userId))
 
-    revalidatePath("/learn")
+    await bumpStreak()
     revalidatePath("/lesson")
-    revalidatePath("/quests")
-    revalidatePath("/leaderboard")
-    revalidatePath(`/lesson/${lessonId}`)
+    revalidatePath("/learn")
 }

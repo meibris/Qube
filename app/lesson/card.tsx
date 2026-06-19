@@ -30,15 +30,15 @@ export const Card = ({
     disabled,
     type,
 }: Props) => {
-    const[audio, _, controls] = useAudio({ src: audioSrc || "" })
+    const [audio, _, controls] = useAudio({ src: audioSrc ?? undefined })
 
     const handleClick = useCallback(() => {
         if (disabled) return
 
-        controls.play()
+        if (audioSrc) controls.play()
         onClick()
-        
-    }, [disabled, onClick, controls])
+
+    }, [disabled, onClick, controls, audioSrc])
 
     useKey(shortcut, handleClick, {}, [handleClick])
 

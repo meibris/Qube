@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run db:seed)",
+      "Bash(npm install react-colorful)",
+      "Bash(npx tsx scripts/add-columns.ts)",
+      "Bash(\"c:\\\\Users\\\\mbrisbois\\\\OneDrive -:*)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|json\\)$\")",
+      "Skill(claude-api)",
+      "Skill(claude-api:*)",
+      "Bash(npm install @anthropic-ai/sdk)",
+      "Bash(npx tsx ./scripts/add-job-column.ts)",
+      "Bash(npx tsx ./scripts/reorder-lessons.ts)",
+      "Bash(npx tsx ./scripts/fix-lesson-order.ts)",
+      "Bash(npx tsx -e \"import ''dotenv/config''; import { neon } from ''@neondatabase/serverless''; const sql = neon\\(process.env.DATABASE_URL!\\); sql\\\\`SELECT id, title, \"\"order\"\" FROM lessons ORDER BY \"\"order\"\"\\\\`.then\\(rows => { rows.forEach\\(r => console.log\\(''order='' + r.order + '' id='' + r.id + '' '' + r.title\\)\\); process.exit\\(0\\); }\\)\")",
+      "Bash(npx tsx ./scripts/check-lessons.ts)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npx tsx ./scripts/setup-job-lesson.ts)",
+      "Bash(npx tsx ./scripts/insert-job-lesson.ts)",
+      "Bash(npx tsx ./scripts/check-db.ts)",
+      "Bash(npx tsx ./scripts/expand-lessons.ts)",
+      "Bash(npx tsx ./scripts/reorder-lessons-v2.ts)",
+      "Bash(npx tsx ./scripts/db-status.ts)",
+      "Bash(npx tsx ./scripts/reset-lesson-path.ts)",
+      "Bash(npx tsx scripts/remove-nouns-verbs.ts)",
+      "Bash(npx tsx scripts/setup-only-job-lesson.ts)",
+      "Bash(npx tsx scripts/add-story-lesson.ts)",
+      "Bash(npx tsc --noEmit --pretty)",
+      "Bash(cat -n \"c:\\\\Users\\\\mbrisbois\\\\OneDrive - Eastside Preparatory School\\\\Documents\\\\Gamified FinanceApp\\\\gamified_biology\\\\app\\\\\\(main\\)\\\\profile\\\\page.tsx\")",
+      "Bash(npx tsx scripts/db-status.ts)",
+      "Bash(npx tsx ./scripts/setup-only-job-lesson.ts)",
+      "Bash(node --import tsx/esm ./scripts/setup-only-job-lesson.ts)",
+      "Bash(npx tsx:*)",
+      "Read(//c/Users/mbrisbois/OneDrive/**)",
+      "Bash(find '/c/Users/mbrisbois/OneDrive - Eastside Preparatory School/Documents/Gamified FinanceApp/gamified_biology/components' -name *game* -o -name *shell*)",
+      "Bash(ls \"c:/Users/mbrisbois/OneDrive - Eastside Preparatory School/Documents/Gamified FinanceApp/gamified_biology/app/\\(main\\)/courses/\")",
+      "Bash(npx tsc *)",
+      "Bash(grep -E \"\\\\.\\(png|jpg|jpeg\\)$\")",
+      "Bash(python3 -c ' *)",
+      "Bash(node -e ' *)"
+    ]
+  }
+}

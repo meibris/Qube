@@ -2,6 +2,35 @@
 import { relations } from "drizzle-orm";
 import { boolean, integer, pgEnum, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
 
+export const classrooms = pgTable("classrooms", {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    emoji: text("emoji").notNull().default("📚"),
+    school: text("school").notNull(),
+    code: text("code").notNull().unique(),
+    teacherUserId: text("teacher_user_id").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+})
+
+export const classroomsRelations = relations(classrooms, ({ many }) => ({
+    members: many(classroomMembers),
+}))
+
+export const classroomMembers = pgTable("classroom_members", {
+    id: serial("id").primaryKey(),
+    classroomId: integer("classroom_id").references(() => classrooms.id, { onDelete: "cascade" }).notNull(),
+    userId: text("user_id").notNull(),
+    role: text("role").notNull(), // 'teacher' | 'student' | 'other'
+    joinedAt: timestamp("joined_at").notNull().defaultNow(),
+})
+
+export const classroomMembersRelations = relations(classroomMembers, ({ one }) => ({
+    classroom: one(classrooms, {
+        fields: [classroomMembers.classroomId],
+        references: [classrooms.id],
+    }),
+}))
+
 export const courses = pgTable("courses", {
     id: serial("id").primaryKey(), //serial will auto increment
     title: text("title").notNull(),
@@ -100,6 +129,17 @@ export const userProgress = pgTable("user_progress", {
     activeCourseId: integer("active_course_id").references(() => courses.id, { onDelete: "cascade" }),
     hearts: integer("hearts").notNull().default(5),
     points: integer("points").notNull().default(0),
+    characterData: text("character_data"),
+    streak: integer("streak").notNull().default(0),
+    lastStreakDate: text("last_streak_date"),
+    jobData: text("job_data"),
+    streakFreezes: integer("streak_freezes").notNull().default(0),  // max 3
+    freezeUsedAt: text("freeze_used_at"),                           // YYYY-MM-DD of last freeze use
+    tokens: integer("tokens").notNull().default(0),
+    tokenRate: integer("token_rate").notNull().default(0),   // tokens earned per hour
+    totalBerries: integer("total_berries").notNull().default(0),
+    jobStartedAt: text("job_started_at"),                    // ISO timestamp — set when minigame completes
+    role: text("role"),                                       // 'teacher' | 'student' | 'other' | null
 })
 
 export const userProgressRelations = relations(userProgress, ({ one }) => 

@@ -8,7 +8,7 @@ export const Promo = () => {
             <div className="space-y-2">
                 <div className="flex items center gap-x-2">
                     <Image
-                        src="/mascot.svg" //this is a placeholder!
+                        src="/QubeSymbolTemp.svg" //this is a placeholder!
                         alt="placeholder" //TOOD: change this
                         height={26}
                         width={26}

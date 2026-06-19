@@ -18,7 +18,7 @@ const QuestsPage = async () => {
 
   // Redirect if no user progress or active course
   if (!userProgress || !userProgress.activeCourse) {
-    redirect("/courses");
+    redirect("/units");
   }
 
   return (
@@ -30,6 +30,16 @@ const QuestsPage = async () => {
           hearts={userProgress.hearts}
           points={userProgress.points}
           hasActiveSubscription={false} // not in use
+          userImageSrc={userProgress.userImageSrc}
+          streak={userProgress.streak ?? 0}
+          lastStreakDate={userProgress.lastStreakDate}
+          jobData={userProgress.jobData}
+          tokens={userProgress.tokens ?? 0}
+          tokenRate={userProgress.tokenRate ?? 0}
+          jobStartedAt={userProgress.jobStartedAt ?? null}
+          activeCourseId={userProgress.activeCourseId}
+          streakFreezes={userProgress.streakFreezes ?? 0}
+          freezeUsedAt={userProgress.freezeUsedAt ?? null}
         />
       </StickyWrapper>
 
@@ -49,26 +59,36 @@ const QuestsPage = async () => {
           </p>
           <ul className="w-full">
             {quests.map((quest) => {
-              const progress = (userProgress.points / quest.value) * 100
+              const current =
+                quest.type === "xp"      ? userProgress.points
+                : quest.type === "coins" ? (userProgress.tokens ?? 0)
+                :                          (userProgress.totalBerries ?? 0)
+              const progress = Math.min((current / quest.value) * 100, 100)
 
               return (
                 <div
                   className="flex items-center w-full p-4 gap-x-4 border-t-2"
                   key={quest.title}
                 >
-                  <Image 
-                    src="/points.svg"
-                    alt="Points"
-                    width={60}
-                    height={60}
-                  />
+                  {quest.icon ? (
+                    <Image
+                      src={quest.icon}
+                      alt={quest.title}
+                      width={60}
+                      height={60}
+                    />
+                  ) : (
+                    <span className="text-5xl w-[60px] h-[60px] flex items-center justify-center">{quest.emoji}</span>
+                  )}
                   <div className="flex flex-col gap-y-2 w-full">
                     <p className="text-neutral-700 text-xl font-bold">
                       {quest.title}
                     </p>
                     <Progress value={progress} className="h-3"/>
+                    <p className="text-xs text-muted-foreground">
+                      {Math.min(current, quest.value)} / {quest.value}
+                    </p>
                   </div>
-
                 </div>
               )
             })}

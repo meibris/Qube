@@ -1,0 +1,8 @@
+<svg version="1.2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 15" width="18" height="15">
+	<defs>
+		<image  width="18" height="15" id="img1" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABIAAAAPBAMAAAAbqIIhAAAAAXNSR0IB2cksfwAAAA9QTFRFAAAAPygykVM7dD85uG9QqWt/AAAAAAV0Uk5TAP////8c0CZSAAAAKElEQVR4nGNkEJI/zwAiGBkFGMDgP6OIAYT1FytLCK4OoQNhClXMAwDpcxQYrKywUQAAAABJRU5ErkJggg=="/>
+	</defs>
+	<style>
+	</style>
+	<use id="VerticleBridge" href="#img1" x="0" y="0"/>
+</svg>

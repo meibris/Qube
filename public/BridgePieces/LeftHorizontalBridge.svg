@@ -1,0 +1,8 @@
+<svg version="1.2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 19 30" width="19" height="30">
+	<defs>
+		<image  width="19" height="30" id="img1" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABMAAAAeBAMAAAA84DghAAAAAXNSR0IB2cksfwAAACRQTFRFAAAAPygy6tSq5KZyuG9QdD85kVM7PygykVM7dD85PygyAG2orW73SQAAAAx0Uk5TAP///////wAAAAH/KQJphQAAAMFJREFUeJxjZGBgYOT/wACigFiI/z6UyajEf+8DJlOQ/z2M6XDlN4zprLgazGQUAJL/Pwr8/8AoYvCXmeEMi8Hf/RDmWWaDv/oQ5qV/Bn/tIcyL/w3++mMoQNKGjclw+Q+MeZH/PYz5iP8+zIRH/E9gVlzk/wKzguHKH6CCeEYxvb/MiqvZ9GTnM4oF/H4qv5ot4Pd8kNNN5bc9AzmdgWHjVPltTyF+2x3tHeUKYXIvy1oAZTLsZvgaAGVybwAJMgAArYZlL5E4Q7UAAAAASUVORK5CYII="/>
+	</defs>
+	<style>
+	</style>
+	<use id="LeftHorizontalBridge" href="#img1" x="0" y="0"/>
+</svg>

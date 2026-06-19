@@ -1,0 +1,8 @@
+<svg version="1.2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 19" width="28" height="19">
+	<defs>
+		<image  width="28" height="19" id="img1" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABwAAAATBAMAAABxdXByAAAAAXNSR0IB2cksfwAAACRQTFRFAAAAPygy6tSquG9Q5KZykVM7dD85PygykVM7dD85PygyPygyDSV31QAAAAx0Uk5TAP///////wIAAAEAfsDVaAAAAIlJREFUeJxjZBB8L8gAAe8F3zMyKr5XgnLvCb5jFDK6KwTl3je6i84VFHzvAuXuAeoV/hewAcpl+hfAKKykcwnKfaCkwyjsxAPnOvFg4X6BcvcBuYwhuxmh3A8gJtD00F0fGEAEkAkUhbuZgQHIZTSCcu9+IIIbAuXuBnPRjGJgbxJPYOCuAxIMAPtJMWyaGzxsAAAAAElFTkSuQmCC"/>
+	</defs>
+	<style>
+	</style>
+	<use id="TopVerticalBridge" href="#img1" x="0" y="0"/>
+</svg>

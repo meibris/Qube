@@ -21,215 +21,104 @@ const main = async () => {
         await db.delete(schema.challengeOptions)
         await db.delete(schema.challengeProgress)
 
-        //courses
+        // ── Courses ───────────────────────────────────────────────────────────
         await db.insert(schema.courses).values([
-            {
-                id:1,
-                title: "Spanish",
-                imageSrc: "/es.svg",
-            },
-            {
-                id:2,
-                title: "Evolution and Classification",
-                imageSrc: "/ch.svg",
-            },
-            {
-                id:3,
-                title: "Metabolism",
-                imageSrc: "/kr.svg",
-            },
-            {
-                id:4,
-                title: "Protein Synthesis",
-                imageSrc: "/it.svg",
-            },
-            {
-                id:5,
-                title: "Genetics",
-                imageSrc: "/it.svg",
-            },
+            { id: 1, title: "Income",      imageSrc: "/TaxesSymbol.svg" },
+            { id: 2, title: "Budget",      imageSrc: "/BudgetSymbol.svg" },
+            { id: 3, title: "Loans",       imageSrc: "/LoanSymbol.svg" },
+            { id: 4, title: "Assets",      imageSrc: "/AssetSymbol.svg" },
+            { id: 5, title: "Investments", imageSrc: "/InvestmentSymbol.svg" },
         ])
 
-        //units
+        // ── Units (one per course) ────────────────────────────────────────────
         await db.insert(schema.units).values([
             {
-                id: 1,
-                courseId: 1, //spanish
+                id: 1, courseId: 1, order: 1,
                 title: "Unit 1",
-                description: "Learn the basics of Spanish",
-                order: 1,
-            }
+                description: "Where does money come from?",
+            },
+            {
+                id: 2, courseId: 2, order: 1,
+                title: "Unit 1",
+                description: "Plan where your money goes",
+            },
+            {
+                id: 3, courseId: 3, order: 1,
+                title: "Unit 1",
+                description: "Borrowing money wisely",
+            },
+            {
+                id: 4, courseId: 4, order: 1,
+                title: "Unit 1",
+                description: "What you own and what it's worth",
+            },
+            {
+                id: 5, courseId: 5, order: 1,
+                title: "Unit 1",
+                description: "Making your money grow",
+            },
         ])
 
-        //lessons
+        // ── Lessons ───────────────────────────────────────────────────────────
         await db.insert(schema.lessons).values([
-            {
-                id: 1,
-                unitId: 1, //unit 1 learn the basics...
-                order: 1,
-                title: "Nouns",
-            },
-            {
-                id: 2,
-                unitId: 1, //unit 1 learn the basics...
-                order: 2,
-                title: "Verb",
-            },
-            {
-                id: 3,
-                unitId: 1, //unit 1 learn the basics...
-                order: 3,
-                title: "Verb",
-            },
-            {
-                id: 4,
-                unitId: 1, //unit 1 learn the basics...
-                order: 4,
-                title: "Verb",
-            },
-            {
-                id: 5,
-                unitId: 1, //unit 1 learn the basics...
-                order: 5,
-                title: "Verb",
-            },
-        ])
-        
-        //questions/challenges
-        await db.insert(schema.challenges).values([
-            {
-                id: 1,
-                lessonId: 1, //nouns
-                type: "SELECT",
-                order: 1,
-                question: 'Which one of these is the "man"?'
-            },
-            {
-                id: 2,
-                lessonId: 1, //nouns
-                type: "ASSIST",
-                order: 2,
-                question: '"The man"',
-            },
-            {
-                id: 3,
-                lessonId: 1, //nouns
-                type: "SELECT",
-                order: 3,
-                question: 'Which one of these is the "woman"?',
-            },
-        ])
 
-        //questions/challenges
-        await db.insert(schema.challenges).values([
-            {
-                id: 4,
-                lessonId: 2, //verbs
-                type: "SELECT",
-                order: 1,
-                question: 'Which one of these is the "man"?'
-            },
-            {
-                id: 5,
-                lessonId: 2, 
-                type: "ASSIST",
-                order: 2,
-                question: '"The man"',
-            },
-            {
-                id: 6,
-                lessonId: 2,
-                type: "SELECT",
-                order: 3,
-                question: 'Which one of these is the "woman"?',
-            },
-        ])
+            // ── Unit 1: Income (9 lessons — custom game pages, no challenges) ───
+            { id:  1, unitId: 1, order: 1, title: "A Day on the Island" },        // → /map (game)
+            { id:  2, unitId: 1, order: 2, title: "Gross & Net Income" },         // → gross-net-income
+            { id:  3, unitId: 1, order: 3, title: "The Shopkeeper's Surprise" },  // → sales-tax-game
+            { id:  4, unitId: 1, order: 4, title: "Sales Tax Explained" },          // → sales-tax
+            { id:  5, unitId: 1, order: 5, title: "Tax Brackets Island" },          // → map-tax (island game)
+            { id:  6, unitId: 1, order: 6, title: "Tax Brackets Explained" },       // → tax-brackets
+            { id:  7, unitId: 1, order: 7, title: "Spending Your Paycheck" },     // → disposable-discretionary
+            { id:  8, unitId: 1, order: 8, title: "Blank" },
+            { id:  9, unitId: 1, order: 9, title: "Blank" },
 
-        //answers: choose man
-        await db.insert(schema.challengeOptions).values([
-            {
-                challengeId: 1, //which one of these is "the man"?
-                imageSrc: "/man.svg",
-                correct: true,
-                text: "el hombre",
-                audioSrc: "/es_man.mp3", //AI voice!
-            },
-            {
-                challengeId: 1, 
-                imageSrc: "/woman.svg",
-                correct: false,
-                text: "la mujer",
-                audioSrc: "/es_woman.mp3", 
-            },
-            {
-                challengeId: 1, 
-                imageSrc: "/bear.svg",
-                correct: false,
-                text: "el oso",
-                audioSrc: "/es_bear.mp3", 
-            },
-            {
-                challengeId: 1, 
-                imageSrc: "/woman.svg",
-                correct: false,
-                text: "test!!! (also checking if long answers work cus)",
-                audioSrc: "/es_woman.mp3", 
-            },
-        ])
+            // ── Unit 2: Budget (9 lessons) ────────────────────────────────────
+            { id: 10, unitId: 2, order: 1, title: "What is a Budget?" },
+            { id: 11, unitId: 2, order: 2, title: "Tracking Your Spending" },
+            { id: 12, unitId: 2, order: 3, title: "Needs vs Wants" },
+            { id: 13, unitId: 2, order: 4, title: "The 50/30/20 Rule" },
+            { id: 14, unitId: 2, order: 5, title: "Building an Emergency Fund" },
+            { id: 15, unitId: 2, order: 6, title: "Saving Goals" },
+            { id: 16, unitId: 2, order: 7, title: "Cutting Expenses" },
+            { id: 17, unitId: 2, order: 8, title: "Monthly Budget Review" },
+            { id: 18, unitId: 2, order: 9, title: "Budget Challenge" },
 
-        //answers: man
-        await db.insert(schema.challengeOptions).values([
-            {
-                challengeId: 2, //"the man"
-                correct: true,
-                text: "el hombre",
-                audioSrc: "/es_man.mp3", //AI voice!
-            },
-            {
-                challengeId: 2, 
-                correct: false,
-                text: "la mujer",
-                audioSrc: "/es_woman.mp3", 
-            },
-            {
-                challengeId: 2, 
-                correct: false,
-                text: "el oso",
-                audioSrc: "/es_bear.mp3", 
-            },
-            {
-                id: 8,
-                challengeId: 2, 
-                correct: false,
-                text: "la mujer 2",
-                audioSrc: "/es_woman.mp3", 
-            },
-        ])
+            // ── Unit 3: Loans (9 lessons) ─────────────────────────────────────
+            { id: 19, unitId: 3, order: 1, title: "What is a Loan?" },
+            { id: 20, unitId: 3, order: 2, title: "Types of Loans" },
+            { id: 21, unitId: 3, order: 3, title: "Understanding Interest Rates" },
+            { id: 22, unitId: 3, order: 4, title: "Credit Scores" },
+            { id: 23, unitId: 3, order: 5, title: "Paying Back Debt" },
+            { id: 24, unitId: 3, order: 6, title: "Loan Applications" },
+            { id: 25, unitId: 3, order: 7, title: "Student Loans" },
+            { id: 26, unitId: 3, order: 8, title: "Mortgages" },
+            { id: 27, unitId: 3, order: 9, title: "Debt Payoff Strategies" },
 
-        //answers: woman
-        await db.insert(schema.challengeOptions).values([
-            {
-                challengeId: 3, //which one of these is "the man"?
-                imageSrc: "/man.svg",
-                correct: false,
-                text: "el hombre",
-                audioSrc: "/es_man.mp3", //AI voice!
-            },
-            {
-                challengeId: 3, 
-                imageSrc: "/woman.svg",
-                correct: true,
-                text: "la mujer",
-                audioSrc: "/es_woman.mp3", 
-            },
-            {
-                challengeId: 3, 
-                imageSrc: "/bear.svg",
-                correct: false,
-                text: "el oso",
-                audioSrc: "/es_bear.mp3", 
-            },
+            // ── Unit 4: Assets (9 lessons) ────────────────────────────────────
+            { id: 28, unitId: 4, order: 1, title: "What are Assets?" },
+            { id: 29, unitId: 4, order: 2, title: "Assets vs Liabilities" },
+            { id: 30, unitId: 4, order: 3, title: "Appreciating & Depreciating" },
+            { id: 31, unitId: 4, order: 4, title: "Net Worth" },
+            { id: 32, unitId: 4, order: 5, title: "Protecting What You Own" },
+            { id: 33, unitId: 4, order: 6, title: "Real Estate" },
+            { id: 34, unitId: 4, order: 7, title: "Vehicle Ownership" },
+            { id: 35, unitId: 4, order: 8, title: "Personal Property" },
+            { id: 36, unitId: 4, order: 9, title: "Building Your Asset Base" },
+
+            // ── Unit 5: Investments (9 lessons) ───────────────────────────────
+            { id: 37, unitId: 5, order: 1, title: "What is Investing?" },
+            { id: 38, unitId: 5, order: 2, title: "Stocks & Bonds" },
+            { id: 39, unitId: 5, order: 3, title: "Compound Interest" },
+            { id: 40, unitId: 5, order: 4, title: "Diversification" },
+            { id: 41, unitId: 5, order: 5, title: "Building Long-Term Wealth" },
+            { id: 42, unitId: 5, order: 6, title: "Index Funds" },
+            { id: 43, unitId: 5, order: 7, title: "Retirement Accounts" },
+            { id: 44, unitId: 5, order: 8, title: "Risk vs Return" },
+            { id: 45, unitId: 5, order: 9, title: "Investment Strategy" },
         ])
+        // All income unit lessons use custom interactive game pages (no challenges).
+        // Challenges for units 2-5 will be added separately.
 
         console.log("Seeding finished")
     } catch (error) {

@@ -1,43 +1,36 @@
 "use client"
 
 import { toast } from "sonner"
-import Image from "next/image"
-import Confetti from "react-confetti"
-import { useAudio, useWindowSize, useMount } from "react-use"
-import { useRouter } from "next/navigation"
+import { useAudio, useMount } from "react-use"
 import { useState, useTransition } from "react"
 
-import { reduceHearts } from "@/actions/user-progress"
-import { useHeartsModal } from "@/store/use-hearts-modal"
 import { challengeOptions, challenges } from "@/db/schema"
 import { upsertChallengeProgress } from "@/actions/challenge-progress"
 
 import { Header } from "./header"
 import { Footer } from "./footer"
 import { Challenge } from "./challenge"
-import { ResultCard } from "./result-card"
 import { QuestionBubble } from "./question-bubble"
 import { usePracticeModal } from "@/store/use-practice-modal"
+import { LessonComplete } from "./lesson-complete"
 
 type Props ={
     initialPercentage: number
-    initialHearts: number
+    initialCoins: number
     initialLessonId: number
     initialLessonChallenges: (typeof challenges.$inferSelect & {
         completed: boolean
         challengeOptions: typeof challengeOptions.$inferSelect[]
     })[]
-    userSubscription: any //not in use
+    userSubscription?: any
 }
 
-export const Quiz = ({ 
+export const Quiz = ({
     initialPercentage,
-    initialHearts,
+    initialCoins,
     initialLessonId,
     initialLessonChallenges,
-    userSubscription, //not in use
 }: Props) => {
-    const { open: openHeartsModal } = useHeartsModal()
     const { open: openPracticeModal } = usePracticeModal()
 
     useMount(() => {
@@ -45,10 +38,6 @@ export const Quiz = ({
             openPracticeModal()
         }
     })
-
-    const { width, height } = useWindowSize()
-
-    const router = useRouter()
 
     const [finishAudio] = useAudio({ src: "/finish.mp3", autoPlay: true })
     const [
@@ -64,7 +53,6 @@ export const Quiz = ({
     const [pending, startTransition] = useTransition()
 
     const [lessonId] = useState(initialLessonId)
-    const [hearts, setHearts] = useState(initialHearts)
     const [percentage, setPercentage] = useState(() => {
         return initialPercentage === 100 ? 0 : initialPercentage
     })
@@ -76,6 +64,7 @@ export const Quiz = ({
 
     const [selectedOption, setSelectedOption] = useState<number>()
     const [status, setStatus] = useState<"correct" | "wrong" | "none">("none")
+    const [wrongChallengeIds, setWrongChallengeIds] = useState<Set<number>>(new Set())
 
     //this is the current challenge
     const challenge = challenges[activeIndex] //which challenge is currently active
@@ -117,82 +106,58 @@ export const Quiz = ({
         if (correctOption.id === selectedOption) {
             startTransition(() => {
                 upsertChallengeProgress(challenge.id)
-                    .then((response) => {
-                        if (response?.error === "hearts") {
-                            openHeartsModal()
-                            return
-                        }
-
+                    .then(() => {
                         correctControls.play()
                         setStatus("correct")
                         setPercentage((prev) => prev + 100 / challenges.length)
-
-                        //this is a practice
-                        if (initialPercentage === 100) {
-                            setHearts((prev) => Math.min(prev, 5)) //change to prev + 1 if there are any errors
-                        }
                     })
                     .catch(() => toast.error("Something went wrong. Please try again."))
             })
         } else {
-            startTransition(() => {
-                reduceHearts(challenge.id)
-                    .then((response) => {
-                        if (response?.error === "hearts") {
-                            openHeartsModal()
-                            return
-                        }
-
-                        incorrectControls.play()
-                        setStatus("wrong")
-
-                        if (!response?.error) {
-                            setHearts((prev) => Math.max(prev - 1, 0))
-                        }
-                    })
-                    .catch(() => toast.error("Something went wrong. Please try again."))
-            })
+            incorrectControls.play()
+            setStatus("wrong")
+            setWrongChallengeIds((prev) => new Set([...prev, challenge.id]))
         }
     }
 
+    const handleRetry = () => {
+        setActiveIndex(0)
+        setPercentage(0)
+        setWrongChallengeIds(new Set())
+        setStatus("none")
+        setSelectedOption(undefined)
+    }
+
     if (!challenge) {
+        const tooManyWrong = wrongChallengeIds.size > challenges.length / 2
+
+        if (tooManyWrong) {
+            return (
+                <div className="fixed inset-0 bg-white flex flex-col items-center justify-center z-50">
+                    <div className="flex flex-col gap-y-4 lg:gap-y-8 max-w-lg mx-auto text-center items-center justify-center px-6">
+                        <span className="text-7xl">😓</span>
+                        <h1 className="text-xl lg:text-3xl font-bold text-neutral-700">
+                            Almost! Let&apos;s try again.
+                        </h1>
+                        <p className="text-neutral-500 text-base">
+                            You missed {wrongChallengeIds.size} out of {challenges.length} questions.
+                            Review and give it another shot!
+                        </p>
+                        <button
+                            onClick={handleRetry}
+                            className="w-full py-3 rounded-xl bg-red-500 hover:bg-red-600 active:scale-95 text-white font-bold text-base shadow-md transition-all"
+                        >
+                            Try Again
+                        </button>
+                    </div>
+                </div>
+            )
+        }
+
         return (
             <>
                 {finishAudio}
-                <Confetti 
-                    width={width}
-                    height={height}
-                    recycle={false}
-                    numberOfPieces={400}
-                    tweenDuration={8000}
-                />
-                <div className="flex flex-col gap-y-4 lg:gap-y-8 max-w-lg mx-auto text-center items-center justify-center h-full">
-                    <Image 
-                        src="/finish.svg"
-                        alt="Finish"
-                        className="block lg:hidden"
-                        height={50}
-                        width={50}
-                    />
-                    <h1 className="text-xl lg:text-3xl font-bold text-neutral-700">
-                        Great job! <br /> You've completed the lesson.
-                    </h1>
-                    <div className="flex items-center gap-x-4 w-full">
-                        <ResultCard 
-                            variant="points"
-                            value={challenges.length * 5}
-                        />
-                        <ResultCard 
-                            variant="hearts"
-                            value={hearts}
-                        />
-                    </div>
-                </div>
-                <Footer 
-                    lessonId={lessonId}
-                    status="completed"
-                    onCheck={() => router.push("/learn")}
-                />
+                <LessonComplete xp={challenges.length * 5} />
             </>
         )
     }
@@ -205,10 +170,9 @@ export const Quiz = ({
         <>
             {incorrectAudio}
             {correctAudio}
-            <Header 
-                hearts={hearts}
+            <Header
+                coins={initialCoins}
                 percentage={percentage}
-                hasActiveSubscription={!!userSubscription?.isActive} //not in use
             />
             <div className="flex-1">
                 <div className="h-full flex items-center justify-center">
