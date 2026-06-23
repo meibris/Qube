@@ -1,7 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect, useRef } from "react"
 import Image from "next/image"
 import { ChevronDown, ChevronUp } from "lucide-react"
 import { saveCharacterData } from "@/actions/character"
@@ -78,10 +77,9 @@ interface Props {
 }
 
 export function ProfilePicturePicker({ initialImage, initialBgColor }: Props) {
-  const router = useRouter()
-  const [saving, setSaving] = useState(false)
   const [selectedImage, setSelectedImage] = useState(initialImage ?? DEFAULT_IMAGE)
   const [bgColor, setBgColor] = useState(initialBgColor ?? DEFAULT_BG)
+  const isInitialMount = useRef(true)
 
   // Sync state when server sends fresh props
   useEffect(() => {
@@ -89,16 +87,15 @@ export function ProfilePicturePicker({ initialImage, initialBgColor }: Props) {
     setBgColor(initialBgColor ?? DEFAULT_BG)
   }, [initialImage, initialBgColor])
 
-  async function handleSave() {
-    setSaving(true)
-    try {
-      const data = { selectedImage, bgColor, type: "profile-picture" }
-      await saveCharacterData(JSON.stringify(data))
-      router.refresh()
-    } finally {
-      setSaving(false)
+  // Auto-save whenever selection changes (skip the very first render)
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false
+      return
     }
-  }
+    const data = { selectedImage, bgColor, type: "profile-picture" }
+    saveCharacterData(JSON.stringify(data))
+  }, [selectedImage, bgColor])
 
   return (
     <div className="flex flex-col lg:flex-row gap-8 w-full">
@@ -144,14 +141,6 @@ export function ProfilePicturePicker({ initialImage, initialBgColor }: Props) {
         {CATEGORIES.map((cat) => (
           <CategoryDropdown key={cat.name} category={cat} selected={selectedImage} onSelect={setSelectedImage} />
         ))}
-
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="mt-2 w-full py-4 rounded-2xl bg-green-500 hover:bg-green-600 active:scale-95 disabled:opacity-60 text-white font-bold text-lg shadow-lg transition-all"
-        >
-          {saving ? "Saving..." : "Save Profile Picture"}
-        </button>
       </div>
     </div>
   )
