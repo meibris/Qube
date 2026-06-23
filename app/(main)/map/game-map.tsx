@@ -1265,7 +1265,8 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444" }: 
     if(!ctx)return
     ctx.imageSmoothingEnabled=false
 
-    const resize=()=>{canvas.width=canvas.offsetWidth;canvas.height=canvas.offsetHeight;ctx.imageSmoothingEnabled=false}
+    const dpr=window.devicePixelRatio||1
+    const resize=()=>{canvas.width=canvas.offsetWidth*dpr;canvas.height=canvas.offsetHeight*dpr;ctx.scale(dpr,dpr);ctx.imageSmoothingEnabled=false}
     resize()
     const ro=new ResizeObserver(resize);ro.observe(canvas)
 
@@ -1277,9 +1278,9 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444" }: 
     window.addEventListener("keydown",onDown)
     window.addEventListener("keyup",onUp)
 
-    ctx.fillStyle="#1a3a2a";ctx.fillRect(0,0,canvas.width,canvas.height)
+    ctx.fillStyle="#1a3a2a";ctx.fillRect(0,0,canvas.offsetWidth,canvas.offsetHeight)
     ctx.fillStyle="white";ctx.font="bold 18px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
-    ctx.fillText("Loading map…",canvas.width/2,canvas.height/2)
+    ctx.fillText("Loading map…",canvas.offsetWidth/2,canvas.offsetHeight/2)
 
     if(variant==="lessonInvest"){stateRef.current.inventory.berries=LIV_START_BERRIES}
 
@@ -1958,7 +1959,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444" }: 
         }
 
         // ── Render ─────────────────────────────────────────────────────────
-        const cw=canvas.width,ch=canvas.height
+        const cw=canvas.offsetWidth,ch=canvas.offsetHeight
         const camX=Math.max(0,Math.min(s.px-cw/2,MAP_W*TS-cw))
         const camY=Math.max(0,Math.min(s.py-ch/2,MAP_H*TS-ch))
         ctx.clearRect(0,0,cw,ch)
@@ -2256,7 +2257,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444" }: 
       ref={canvasRef}
       tabIndex={0}
       className="w-full h-full outline-none block"
-      style={{imageRendering:"pixelated"}}
+      style={{imageRendering:"auto"}}
     />
   )
 }
