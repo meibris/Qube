@@ -986,7 +986,7 @@ function drawLessonCompleteL3(ctx:CanvasRenderingContext2D,cw:number,ch:number){
   ctx.fillStyle="#4b5563";ctx.font="13px sans-serif"
   ctx.fillText("That extra coin went to the government — that's sales tax.",cw/2,py+170)
   ctx.fillStyle="#94a3b8";ctx.font="12px sans-serif"
-  ctx.fillText("Returning to learn…",cw/2,py+220)
+  ctx.fillText("[Z] Continue",cw/2,py+220)
 }
 
 // ─── Day-over overlay ─────────────────────────────────────────────────────────
@@ -1854,6 +1854,12 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444" }: 
           let eUsed=false
           const consumeE=()=>{eUsed=true;keys.delete("z");keys.delete("Z")}
 
+          // 0a. bread screen shown — wait for Z to continue
+          if(eDown&&!eUsed&&s.gameStage===L3_COMPLETE){
+            if(!s.completionCalled){s.completionCalled=true;completeRef.current?.()}
+            consumeE()
+          }
+
           // 0. market open — buy bread
           if(eDown&&!eUsed&&s.marketOpen){
             if(s.inventory.coins>=L3_BREAD_TOTAL){
@@ -1861,7 +1867,6 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444" }: 
               s.marketOpen=false
               s.gameStage=L3_COMPLETE
               s.notifText="🍞 Bread purchased! (+1 coin was sales tax)";s.notifTimer=180
-              if(!s.completionCalled){s.completionCalled=true;completeRef.current?.()}
             }else{
               s.marketOpen=false
             }
