@@ -822,24 +822,33 @@ function drawTopBar(ctx:CanvasRenderingContext2D,cw:number,sustenance:number,inv
 
 // ─── Task sign ────────────────────────────────────────────────────────────────
 function drawTaskSign(ctx:CanvasRenderingContext2D,text:string,x:number,y:number,imgs?:ImgMap){
-  const TW=220,TH=74,pad=10
-  ctx.fillStyle="#ffffff";ctx.beginPath();ctx.roundRect(x,y,TW,TH,14);ctx.fill()
-  ctx.strokeStyle="#bfdbfe";ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(x,y,TW,TH,14);ctx.stroke()
+  const TW=320,pad=10,lineH=16
   const BERRY_TAG=":berry:"
   const hasBerry=text.startsWith(BERRY_TAG)
   const label=hasBerry?text.slice(BERRY_TAG.length):text
+  const iSz=hasBerry?16:0
+  const textX=x+pad+(hasBerry?iSz+4:0)
+  const maxW=TW-pad*2-(hasBerry?iSz+4:0)
+  ctx.font="bold 11px sans-serif"
+  const words=label.split(" ")
+  const lines:string[]=[]
+  let cur=""
+  for(const w of words){const t=cur?`${cur} ${w}`:w;if(ctx.measureText(t).width>maxW&&cur){lines.push(cur);cur=w}else cur=t}
+  if(cur)lines.push(cur)
+  const TH=Math.max(58,32+lines.length*lineH+pad)
+  ctx.fillStyle="#ffffff";ctx.beginPath();ctx.roundRect(x,y,TW,TH,14);ctx.fill()
+  ctx.strokeStyle="#bfdbfe";ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(x,y,TW,TH,14);ctx.stroke()
   ctx.fillStyle="#1e40af";ctx.font="bold 11px sans-serif";ctx.textAlign="left";ctx.textBaseline="middle"
   ctx.fillText("TASK",x+pad,y+13)
   ctx.save()
-  ctx.beginPath();ctx.rect(x+pad,y+24,TW-pad*2,TH-24);ctx.clip()
-  ctx.textBaseline="middle";ctx.textAlign="left"
-  if(hasBerry){
-    const iSz=16
-    if(imgs?.["berry"]){ctx.drawImage(imgs["berry"],x+pad,y+52-iSz/2,iSz,iSz)}
-    ctx.font="bold 11px sans-serif";ctx.fillStyle="#1e293b";ctx.fillText(label,x+pad+iSz+4,y+52)
-  }else{
-    ctx.font="bold 11px sans-serif";ctx.fillStyle="#1e293b";ctx.fillText(text,x+pad,y+52)
-  }
+  ctx.beginPath();ctx.rect(x,y+24,TW,TH-24);ctx.clip()
+  ctx.font="bold 11px sans-serif";ctx.fillStyle="#1e293b";ctx.textAlign="left";ctx.textBaseline="middle"
+  const startY=y+32+lineH/2
+  lines.forEach((line,i)=>{
+    const ly=startY+i*lineH
+    if(i===0&&hasBerry&&imgs?.["berry"])ctx.drawImage(imgs["berry"],x+pad,ly-iSz/2,iSz,iSz)
+    ctx.fillText(line,textX,ly)
+  })
   ctx.restore()
 }
 
