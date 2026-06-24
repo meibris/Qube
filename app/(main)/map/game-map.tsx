@@ -1177,6 +1177,16 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444" }: 
   const completeRef=useRef<(()=>void)|null>(null)
   const [lessonDone, setLessonDone]=useState(false)
   const [finalCoins, setFinalCoins]=useState(0)
+  const [showOverlay, setShowOverlay]=useState(false)
+  const [overlayOpacity, setOverlayOpacity]=useState(0)
+
+  function triggerFadeOut(then: ()=>void){
+    setTimeout(()=>{
+      setShowOverlay(true)
+      requestAnimationFrame(()=>requestAnimationFrame(()=>setOverlayOpacity(1)))
+      setTimeout(then, 1500)
+    }, 3000)
+  }
 
   const stageComplete=variant==="lesson1"?L1_COMPLETE:variant==="lessonBudget"?LB_COMPLETE:variant==="lessonLoans"?LL_COMPLETE:variant==="lessonInvest"?LIV_COMPLETE:L3_COMPLETE
 
@@ -1235,25 +1245,25 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444" }: 
       if(variant==="lesson1"){
         saveGameLesson("unit1GameCompleted",inv.coins,inv.berries).catch(()=>{})
         setFinalCoins(inv.coins)
-        setLessonDone(true)
+        triggerFadeOut(()=>setLessonDone(true))
       }else if(variant==="lessonBudget"){
         saveGameLesson("budgetMapCompleted",inv.coins,inv.berries).catch(()=>{})
         setFinalCoins(inv.coins)
-        setLessonDone(true)
+        triggerFadeOut(()=>setLessonDone(true))
       }else if(variant==="lessonLoans"){
         saveGameLesson("loansMapCompleted",inv.coins,inv.berries).catch(()=>{})
         setFinalCoins(inv.coins)
-        setLessonDone(true)
+        triggerFadeOut(()=>setLessonDone(true))
       }else if(variant==="lessonInvest"){
         saveGameLesson("investIntroCompleted",inv.coins,inv.berries).catch(()=>{})
         setFinalCoins(inv.coins)
-        setLessonDone(true)
+        triggerFadeOut(()=>setLessonDone(true))
       }else if(variant==="lessonTax"){
         saveGameLesson("taxBracketsGameCompleted",inv.coins,inv.berries).catch(()=>{})
-        setTimeout(()=>router.push("/learn"),2200)
+        triggerFadeOut(()=>router.push("/learn"))
       }else{
         saveGameLesson("salesTaxGameCompleted",inv.coins,inv.berries).catch(()=>{})
-        setTimeout(()=>router.push("/learn"),2200)
+        triggerFadeOut(()=>router.push("/learn"))
       }
     }
   },[router,variant])
@@ -2253,11 +2263,19 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444" }: 
   }
 
   return(
-    <canvas
-      ref={canvasRef}
-      tabIndex={0}
-      className="w-full h-full outline-none block"
-      style={{imageRendering:"auto"}}
-    />
+    <div className="relative w-full h-full">
+      <canvas
+        ref={canvasRef}
+        tabIndex={0}
+        className="w-full h-full outline-none block"
+        style={{imageRendering:"auto"}}
+      />
+      {showOverlay&&(
+        <div
+          className="absolute inset-0 bg-white pointer-events-none"
+          style={{opacity:overlayOpacity,transition:"opacity 1.5s ease-in"}}
+        />
+      )}
+    </div>
   )
 }
