@@ -1226,6 +1226,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444" }: 
     // lesson 3 fields
     activeConversation: null as {npcIdx:number;phase:number;line:string}|null,
     marketOpen: false as boolean,
+    breadDismissed: false as boolean,
     // lesson budget fields
     houseSaleOpen: false as boolean,
     // lesson invest fields
@@ -1864,7 +1865,8 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444" }: 
           const consumeE=()=>{eUsed=true;keys.delete("z");keys.delete("Z")}
 
           // 0a. bread screen shown — wait for Z to continue
-          if(eDown&&!eUsed&&s.gameStage===L3_COMPLETE){
+          if(eDown&&!eUsed&&s.gameStage===L3_COMPLETE&&!s.breadDismissed){
+            s.breadDismissed=true
             if(!s.completionCalled){s.completionCalled=true;completeRef.current?.()}
             consumeE()
           }
@@ -2220,7 +2222,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444" }: 
 
         // ── Shared overlays ───────────────────────────────────────────────
         if(s.notifTimer>0)drawNotifBanner(ctx,cw,ch,s.notifText,Math.min(1,s.notifTimer/40))
-        if(variant==="lesson3"&&s.gameStage===L3_COMPLETE)drawLessonCompleteL3(ctx,cw,ch)
+        if(variant==="lesson3"&&s.gameStage===L3_COMPLETE&&!s.breadDismissed)drawLessonCompleteL3(ctx,cw,ch)
         if(s.dayOver)drawDayOver(ctx,cw,ch,s.deathDropped,s.deathLost)
 
         s.raf=requestAnimationFrame(loop)
