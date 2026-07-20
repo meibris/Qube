@@ -21,6 +21,11 @@ export default function Home() {
         <h1 className="text-xl lg:text-3xl font-bold text-neutral-600 max-w-[480px] text-center">
           Have fun by learning, practicing, and mastering finance with Qube Finance!
         </h1>
+        <p className="text-sm lg:text-base text-neutral-500 max-w-[480px] text-center">
+          Qube Finance is a gamified financial literacy platform that teaches
+          budgeting, taxes, investing, and loans through interactive lessons
+          and games.
+        </p>
         <div className="flex flex-col items-center gap-y-3 max-w-[330px] w-full">
           <ClerkLoading>
             <Loader className="h-5 w-5 text-muted-foreground animate-spin" />

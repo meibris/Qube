@@ -1180,7 +1180,7 @@ function drawPrompt(ctx:CanvasRenderingContext2D,cw:number,ch:number,msg:string,
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444" }: { variant: MapVariant; initialCoins?: number; playerColor?: string }) {
+export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", paused = false }: { variant: MapVariant; initialCoins?: number; playerColor?: string; paused?: boolean }) {
   const canvasRef=useRef<HTMLCanvasElement>(null)
   const router=useRouter()
   const completeRef=useRef<(()=>void)|null>(null)
@@ -1188,6 +1188,8 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444" }: 
   const [finalCoins, setFinalCoins]=useState(0)
   const [showOverlay, setShowOverlay]=useState(false)
   const [overlayOpacity, setOverlayOpacity]=useState(0)
+  const pausedRef=useRef(paused)
+  useEffect(()=>{pausedRef.current=paused},[paused])
 
   function triggerFadeOut(then: ()=>void){
     setTimeout(()=>{
@@ -1291,8 +1293,9 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444" }: 
     const ro=new ResizeObserver(resize);ro.observe(canvas)
 
     const onDown=(e:KeyboardEvent)=>{
-      stateRef.current.keys.add(e.key)
       if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key))e.preventDefault()
+      if(pausedRef.current)return
+      stateRef.current.keys.add(e.key)
     }
     const onUp=(e:KeyboardEvent)=>stateRef.current.keys.delete(e.key)
     window.addEventListener("keydown",onDown)
@@ -1316,7 +1319,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444" }: 
         _bridgesOpen=true
 
         // ── Sustenance drain ───────────────────────────────────────────────
-        if(!s.dayOver&&s.gameStage<stageComplete){
+        if(!s.dayOver&&s.gameStage<stageComplete&&!pausedRef.current){
           s.sustenance=Math.max(0,s.sustenance-MAP_DRAIN)
           if(s.sustenance<=0&&!s.dayOver){
             const dBerries=Math.floor(s.inventory.berries*2/3)

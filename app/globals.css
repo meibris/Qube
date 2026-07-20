@@ -144,3 +144,150 @@ body,
     @apply bg-background text-foreground;
   }
 }
+
+/* ─── Story scroll modal ──────────────────────────────────────────────── */
+@keyframes scroll-unroll-kf {
+  0% { transform: scaleY(0); }
+  65% { transform: scaleY(1.04); }
+  100% { transform: scaleY(1); }
+}
+@keyframes scroll-rollup-kf {
+  0% { transform: scaleY(1); }
+  100% { transform: scaleY(0); }
+}
+.scroll-unroll {
+  transform-origin: center;
+  animation: scroll-unroll-kf 550ms cubic-bezier(.22,.8,.32,1) both;
+}
+.scroll-rollup {
+  transform-origin: center;
+  animation: scroll-rollup-kf 380ms ease-in both;
+}
+
+.scroll-dowel {
+  position: relative;
+  height: 20px;
+  margin: 0 22px;
+  background: #8a5a30;
+  border: 3px solid #2e1c0e;
+  box-shadow:
+    inset 0 3px 0 rgba(255,255,255,0.18),
+    inset 0 -3px 0 rgba(0,0,0,0.35);
+  image-rendering: pixelated;
+  z-index: 2;
+}
+.scroll-dowel::before,
+.scroll-dowel::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  background: #5c371b;
+  border: 3px solid #2e1c0e;
+  box-shadow:
+    inset 2px 2px 0 rgba(255,255,255,0.15),
+    inset -2px -2px 0 rgba(0,0,0,0.35);
+  clip-path: polygon(
+    25% 0%, 75% 0%, 100% 25%, 100% 75%, 75% 100%, 25% 100%, 0% 75%, 0% 25%
+  );
+}
+.scroll-dowel::before { left: -22px; }
+.scroll-dowel::after { right: -22px; }
+
+.scroll-parchment {
+  position: relative;
+  margin: -2px 0;
+  padding: 28px 26px 24px;
+  background-color: #ecd9ab;
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(107,64,32,0.05) 0px, rgba(107,64,32,0.05) 2px,
+    transparent 2px, transparent 4px
+  );
+  border: 3px solid #2e1c0e;
+  clip-path: polygon(
+    0% 12px, 12px 12px, 12px 0%,
+    calc(100% - 12px) 0%, calc(100% - 12px) 12px, 100% 12px,
+    100% calc(100% - 12px), calc(100% - 12px) calc(100% - 12px), calc(100% - 12px) 100%,
+    12px 100%, 12px calc(100% - 12px), 0% calc(100% - 12px)
+  );
+  box-shadow: 6px 6px 0 rgba(0,0,0,0.4);
+  image-rendering: pixelated;
+}
+
+.scroll-title {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 800;
+  text-align: center;
+  font-size: 1.25rem;
+  line-height: 1.35;
+  color: #2e1c0e;
+  margin-bottom: 14px;
+}
+
+.scroll-body {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: #2e1c0e;
+  text-align: left;
+}
+
+.scroll-choice-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.scroll-choice-num {
+  flex: none;
+  display: flex;
+  align-items: center;
+  font-family: Georgia, serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #2e1c0e;
+  min-width: 24px;
+}
+
+.scroll-choice-btn {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  padding: 0;
+  background: #c9a876;
+  border: 2px solid #2e1c0e;
+  cursor: pointer;
+  overflow: hidden;
+  transition: background 100ms ease, transform 80ms ease;
+}
+.scroll-choice-btn:hover {
+  background: #d8bd8f;
+}
+.scroll-choice-btn:active,
+.scroll-choice-btn.scroll-choice-pressed {
+  transform: scale(0.97);
+  background: #b6905e;
+}
+.scroll-choice-icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  border-right: 2px solid #2e1c0e;
+  background: #bfa06e;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+.scroll-choice-text {
+  flex: 1;
+  padding: 10px 12px;
+  font-family: Georgia, serif;
+  font-size: 0.92rem;
+  line-height: 1.3;
+  color: #2e1c0e;
+  text-align: left;
+}
