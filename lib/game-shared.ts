@@ -122,3 +122,49 @@ export function drawDialogBox(
   ctx.fillStyle = "#94a3b8"; ctx.font = "13px sans-serif"; ctx.textAlign = "right"
   ctx.fillText(isLast ? "[Z] ok" : "[Z] next", px + pw - 14, py + ph - 14)
 }
+
+// ─── Choice dialogue box (in-game decision, distinct from the parchment scroll) ─
+// Used for "normal" gameplay decisions — e.g. picking how to fund a farm plot —
+// as opposed to the big CYOA stream picker, which stays a StoryScroll.
+export interface DialogChoiceOption { icon: string; text: string }
+
+export function drawChoiceDialogBox(
+  ctx: CanvasRenderingContext2D,
+  cw: number, ch: number,
+  speaker: string, speakerColor: string,
+  prompt: string,
+  choices: DialogChoiceOption[],
+  selectedIndex: number,
+) {
+  const pw = Math.min(820, cw - 32)
+  const headerH = 56, choiceH = 46, gap = 8
+  const ph = headerH + choices.length * (choiceH + gap) + 14
+  const px = Math.round(cw / 2 - pw / 2), py = ch - ph - 20
+
+  ctx.fillStyle = "#ffffff"
+  ctx.beginPath(); ctx.roundRect(px, py, pw, ph, 16); ctx.fill()
+  ctx.strokeStyle = speakerColor; ctx.lineWidth = 2.5
+  ctx.beginPath(); ctx.roundRect(px, py, pw, ph, 16); ctx.stroke()
+  ctx.fillStyle = speakerColor; ctx.font = "bold 16px sans-serif"
+  ctx.textAlign = "left"; ctx.textBaseline = "middle"
+  ctx.fillText(speaker, px + 16, py + 22)
+  ctx.strokeStyle = `${speakerColor}44`; ctx.lineWidth = 1
+  ctx.beginPath(); ctx.moveTo(px + 16, py + 38); ctx.lineTo(px + pw - 16, py + 38); ctx.stroke()
+  ctx.fillStyle = "#64748b"; ctx.font = "14px sans-serif"
+  ctx.fillText(prompt, px + 16, py + 49)
+
+  for (let i = 0; i < choices.length; i++) {
+    const cy = py + headerH + i * (choiceH + gap)
+    const selected = i === selectedIndex
+    ctx.fillStyle = selected ? "#eff6ff" : "#f8fafc"
+    ctx.beginPath(); ctx.roundRect(px + 16, cy, pw - 32, choiceH, 10); ctx.fill()
+    ctx.strokeStyle = selected ? "#3b82f6" : "#e2e8f0"; ctx.lineWidth = selected ? 2.5 : 1.5
+    ctx.beginPath(); ctx.roundRect(px + 16, cy, pw - 32, choiceH, 10); ctx.stroke()
+    ctx.fillStyle = "#1e293b"; ctx.font = "15px sans-serif"
+    ctx.textAlign = "left"; ctx.textBaseline = "middle"
+    ctx.fillText(`${i + 1}. ${choices[i].icon}  ${choices[i].text}`, px + 30, cy + choiceH / 2)
+  }
+
+  ctx.fillStyle = "#94a3b8"; ctx.font = "12px sans-serif"; ctx.textAlign = "right"
+  ctx.fillText("[↑↓] select   [Z] confirm", px + pw - 14, py + ph - 8)
+}

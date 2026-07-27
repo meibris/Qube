@@ -12,11 +12,16 @@ import {
   NPC_HALF, NPC_SPEED,
   type ImgMap, type Inventory, freshInventory,
   drawInventoryPanel,
-  drawSharedPlayer, drawDialogBox,
+  drawSharedPlayer, drawDialogBox, drawChoiceDialogBox,
 } from "@/lib/game-shared"
+import {
+  PLANT_REGISTRY, FARM_SOIL_TILE_COLOR, PHASE_1_CONTENT,
+  applyPhase1Choice, payForPlotClearing, createInitialFarmPlotState,
+  type FarmPlotState, type Phase1ChoiceID, type PlantDefinition,
+} from "@/lib/farm-plot"
 // sustenanceSpeedMult intentionally omitted — speed is flat regardless of energy
 
-export type MapVariant = "lesson1" | "lesson3" | "lessonTax" | "lessonBudget" | "lessonLoans" | "lessonInvest"
+export type MapVariant = "lesson1" | "lessonFarm" | "lessonBudget" | "lessonLoans" | "lessonInvest"
 
 // ─── World constants ──────────────────────────────────────────────────────────
 const TS=32, MAP_W=88, MAP_H=58
@@ -31,9 +36,17 @@ const GOV_HOME_C=37, GOV_HOME_R=38
 const GOV_WANDER=3*TS, GOV_INTERACT=2.5*TS
 const TAX_RATE=0.10
 
-// ─── Lesson 3 constants ───────────────────────────────────────────────────────
-const L3_NPC_BERRIES_COST=5, L3_NPC_MAX_TRADES=3, L3_NPC_BUY_RESET=7200
-const L3_BREAD_LISTED=5, L3_BREAD_TAX=1, L3_BREAD_TOTAL=6
+// ─── Lesson Farm constants ────────────────────────────────────────────────────
+// Plot sits just west of the Income Center (the "town center" building) — same
+// shared island every lesson plays on, just a new patch of ground + two NPCs.
+const FARM_PLOT_C1=29, FARM_PLOT_C2=33, FARM_PLOT_R1=32, FARM_PLOT_R2=36
+const FARM_BINK_C=34, FARM_BINK_R=34
+const FARM_MACHINE_C=35, FARM_MACHINE_R=34
+const FARM_DIG_TILES=[{c:30,r:33},{c:32,r:34},{c:30,r:35}]
+const FARM_DIG_SPOTS=FARM_DIG_TILES.map(p=>({wx:(p.c+0.5)*TS,wy:(p.r+0.5)*TS}))
+const FARM_BINK_X=(FARM_BINK_C+0.5)*TS, FARM_BINK_Y=(FARM_BINK_R+0.5)*TS
+const FARM_MACHINE_X=(FARM_MACHINE_C+0.5)*TS, FARM_MACHINE_Y=(FARM_MACHINE_R+0.5)*TS
+const FARM_INTERACT=TS*2.2
 
 // ─── Foliage draw sizes ───────────────────────────────────────────────────────
 const TREE_DW=64, TREE_DH=64, BUSH_DW=48, BUSH_DH=24
@@ -42,8 +55,10 @@ const TREE_DW=64, TREE_DH=64, BUSH_DW=48, BUSH_DH=24
 const L1_INTRO=0, L1_HARVEST=1, L1_SELL_INTRO=2
 const L1_SELLING=3, L1_GROSS_TALK=4, L1_GOV_TAX=5, L1_COMPLETE=6
 
-// ─── Lesson 3 stages ──────────────────────────────────────────────────────────
-const L3_INTRO=0, L3_EARN=1, L3_COMPLETE=2
+// ─── Lesson Farm stages ───────────────────────────────────────────────────────
+const FARM_TALK_BLOO=0, FARM_FIND_BINK=1, FARM_CHOICE=2
+const FARM_TASK_LOAN=3, FARM_TASK_MACHINE=4, FARM_TASK_DIG=5
+const FARM_TRAP_OUTCOME=6, FARM_PLANT_REVEAL=7, FARM_COMPLETE=8
 
 // ─── Lesson Budget (Lesson 10) stages ────────────────────────────────────────
 const LB_INTRO=0, LB_EXPLORE=1, LB_BLOO_BUDGET=2, LB_COMPLETE=3
@@ -120,39 +135,38 @@ const L1_NPC_NO_BERRY: string[] = [
   "Come back with berries and I'll buy!",
 ]
 
-// ─── Lesson 3 dialogues ───────────────────────────────────────────────────────
-const L3_BLOO_INTRO: string[] = [
-  "Welcome back to the island! 🌴 Big news — the Market is open!",
-  "The Market Trader (green square) is selling freshly baked bread. 🍞",
-  "Way tastier than raw berries, I promise.",
-  "But berry prices dropped since last time. Now it takes 5 berries to earn 1 coin.",
-  "Walk up to any colored villager and press [Z] to trade 5 berries for 1 coin.",
-  "Once you have coins, find the Market Trader and press [Z] to open the shop. Go!",
+
+// ─── Lesson Farm dialogues ──────────────────────────────────────────────────────
+const FARM_BLOO_INTRO: string[] = [
+  "Hey! Ready to start your own little farm? 🌱",
+  "There's an overgrown plot just west of the town center — perfect, but it needs clearing first.",
+  "You'll need 100 coins for seeds and land clearing.",
+  "I saw someone new hanging around by the plot. They might have ideas about money. Go talk to them!",
 ]
-const L3_NPC_OFFER: string[] = [
-  "Tough times — 1 coin for 5 berries. Deal?",
-  "Five berries, one coin. My rate today.",
-  "...1 coin for 5 berries. Make it quick.",
-  "",
+const FARM_BINK_INTRO: string[] = [
+  "Well, well. Another little farm popping up.",
+  "I'm building something BIG here — a giant Mega-Mall. One huge store, everything you need, no more little plots.",
+  "Small farms like yours? Cute. But you're in my way.",
+  "Still, I'm not heartless. Need help covering that 100 coins? I've got options for you...",
 ]
-const L3_NPC_SOLD: string[] = [
-  "Pleasure. Spend wisely!",
-  "Done! Come back with more.",
-  "Fine. Here's your coin.",
-  "",
-]
-const L3_NPC_NOT_ENOUGH: string[] = [
-  "I need 5 berries per coin. You're short.",
-  "Five berries for a coin. You don't have enough.",
-  "5 berries. No exceptions.",
-  "",
-]
-const L3_NPC_FULL: string[] = [
-  "All stocked for now. Come back later!",
-  "Don't need more right now.",
-  "I'm full. Later.",
-  "",
-]
+const FARM_LOAN_LINE = "Sign here — 100 coins, coming right up. Just remember: you'll owe 12 coins every time you sell a batch of 5 plants."
+const FARM_MACHINE_LINE = "Ta-da! 5 coins, just like that. (...and 10% of every harvest, forever. Don't worry about the fine print.)"
+const FARM_DIG_LINE = "Scatter the rotten berries and let the bugs do the work!"
+function plantRevealLines(plant: PlantDefinition): string[] {
+  return [
+    `Whoa, look at that! ${plant.emoji} ${plant.name}!`,
+    plant.vibe,
+    plant.mechanic,
+    `That's actually teaching you about ${plant.concept} — pretty cool, huh?`,
+  ]
+}
+function farmTrapLines(state: FarmPlotState): string[] {
+  return [
+    "Hmm, only 5 coins... that's not enough to clear the plot yet.",
+    `You'll owe Bink ${Math.round(state.binkCropInterestRate*100)}% of every harvest you ever make here — forever.`,
+    "Come back once you've earned more coins elsewhere, and we'll try again.",
+  ]
+}
 
 // ─── Lesson Budget dialogues ──────────────────────────────────────────────────
 const LB_BLOO_INTRO: string[] = [
@@ -254,19 +268,10 @@ function buildMap(): TileID[][] {
   }
   for (let r=0; r<MAP_H; r++) for (let c=0; c<MAP_W; c++) if (isLand(r,c)) m[r][c]=GRASS
   for (let c=0; c<MAP_W; c++) if (m[25][c]===GRASS||m[26][c]===GRASS) { if (c>=20&&c<=54) { m[25][c]=WATER; m[26][c]=WATER } }
-  // Left island → main island: L-bridge (south along east coast, then east across water)
-  fill(17,22,17,18,PATH)    // vertical going south along left island east coast
-  fill(22,23,17,24,PATH)    // horizontal bridge across water to main island
   // Main island roads (interior, no water-edge bridge artifacts)
   fill(22,23,25,51,PATH)    // top horizontal road (cleanly inland c=25–51)
   fill(28,29,22,54,PATH)    // bottom horizontal road (inland c=22–54)
   fill(22,29,40,41,PATH)    // interior vertical connector
-  // Main island → top-right island: L-bridge (north first, then east)
-  fill(11,22,52,53,PATH)    // vertical going north from r=22 to r=11 at c=52–53
-  fill(10,11,52,65,PATH)    // horizontal going east at r=10–11 to top-right island
-  // Main island → bot-right island: L-bridge (east first, then south)
-  fill(28,29,55,65,PATH)    // horizontal extension east over water c=55–65
-  fill(29,45,65,66,PATH)    // vertical going south to bot-right island
   fill(19,22,29,30,PATH); fill(19,19,29,33,PATH)
   fill(28,34,43,44,PATH); fill(28,28,38,44,PATH)
   fill(16,19,9,14,PATH);  fill(13,16,7,8,PATH);   fill(13,13,7,11,PATH)
@@ -336,47 +341,36 @@ function buildMap(): TileID[][] {
 }
 const MAP = buildMap()
 
-// ─── Bridge barriers ──────────────────────────────────────────────────────────
-let _bridgesOpen = true
-function computeBarrierTiles(): Set<string> {
-  const set = new Set<string>()
-  const addBarrier = (r1:number, c1:number, r2:number, c2:number) => {
-    const dr=r2-r1, dc=c2-c1, steps=Math.max(Math.abs(dr),Math.abs(dc))
-    const lo=Math.floor(steps*0.25), hi=Math.ceil(steps*0.75)
-    for (let i=lo; i<=hi; i++) {
-      const r=Math.round(r1+dr*i/steps), c=Math.round(c1+dc*i/steps)
-      set.add(`${r},${c}`)
-      if (Math.abs(dc)>=Math.abs(dr)) set.add(`${r+1},${c}`)
-      else set.add(`${r},${c+1}`)
-    }
+// ─── Grass edge tiles (border water) ──────────────────────────────────────────
+const GRASS_EDGE: boolean[][] = (() => {
+  const edge = Array.from({length:MAP_H}, () => new Array<boolean>(MAP_W).fill(false))
+  for (let r=0; r<MAP_H; r++) for (let c=0; c<MAP_W; c++) {
+    if (MAP[r][c]!==GRASS) continue
+    const nbrs = [[r-1,c],[r+1,c],[r,c-1],[r,c+1]]
+    if (nbrs.some(([nr,nc]) => nr>=0&&nr<MAP_H&&nc>=0&&nc<MAP_W&&MAP[nr][nc]===WATER)) edge[r][c]=true
   }
-  addBarrier(17,17,22,18)       // left bridge: vertical section (east coast of left island)
-  addBarrier(22,17,22,22)       // left bridge: horizontal section (water crossing)
-  addBarrier(11,52,22,52)       // top-right bridge: vertical section (north from main island)
-  addBarrier(10,52,10,65)       // top-right bridge: horizontal section (east to top-right island)
-  addBarrier(28,56,28,64)       // bot-right bridge: horizontal water-crossing
-  addBarrier(29,65,44,65)       // bot-right bridge: vertical section (south to bot-right island)
-  return set
-}
-const BARRIER_TILES = computeBarrierTiles()
+  return edge
+})()
+
+// ─── Path edge tiles (border water or a darkened grass edge) ─────────────────
+const PATH_EDGE: boolean[][] = (() => {
+  const edge = Array.from({length:MAP_H}, () => new Array<boolean>(MAP_W).fill(false))
+  for (let r=0; r<MAP_H; r++) for (let c=0; c<MAP_W; c++) {
+    if (MAP[r][c]!==PATH) continue
+    const nbrs = [[r-1,c],[r+1,c],[r,c-1],[r,c+1]]
+    if (nbrs.some(([nr,nc]) => nr>=0&&nr<MAP_H&&nc>=0&&nc<MAP_W&&(MAP[nr][nc]===WATER||GRASS_EDGE[nr]?.[nc]))) edge[r][c]=true
+  }
+  return edge
+})()
 
 // ─── Image loading ────────────────────────────────────────────────────────────
 async function loadImages(): Promise<ImgMap> {
   const pngNames=["grass1","grass2","grass3","grass4","grass5","grass6","grassflower1","grassflower2","path1","path2","path3","path4","path5","path6","water1","water2"]
   const woodSvgNames=["house","cabin","tallcabin","tallhouse","markethouse"]
-  const bridgeSvgMap: [string, string][] = [
-    ["bridge_h_left",  "/BridgePieces/LeftHorizontalBridge.svg"],
-    ["bridge_h_mid",   "/BridgePieces/HorizontalBridge.svg"],
-    ["bridge_h_right", "/BridgePieces/RightHorizontalBridge.svg"],
-    ["bridge_v_top",   "/BridgePieces/TopVerticalBridge.svg"],
-    ["bridge_v_mid",   "/BridgePieces/VerticleBridge.svg"],
-    ["bridge_v_bot",   "/BridgePieces/BottomVerticalBridge.svg"],
-  ]
   const imgs: ImgMap = {}
   return Promise.all([
     ...pngNames.map(n=>new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs[n]=img;res()};img.onerror=()=>res();img.src=`/${n}.png`})),
     ...woodSvgNames.map(n=>new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs[n]=img;res()};img.onerror=()=>res();img.src=`/woodbuildings/${n}.svg`})),
-    ...bridgeSvgMap.map(([k,src])=>new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs[k]=img;res()};img.onerror=()=>res();img.src=src})),
     new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["berry"]=img;res()};img.onerror=()=>res();img.src="/Berry.png"}),
     new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["treeApples"]=img;res()};img.onerror=()=>res();img.src="/treeApples.png"}),
     new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["treeNoApples"]=img;res()};img.onerror=()=>res();img.src="/treeNoApples.png"}),
@@ -436,7 +430,6 @@ function isBlocking(wx:number,wy:number):boolean{
   if(r<0||r>=MAP_H||c<0||c>=MAP_W)return true
   const t=MAP[r][c]
   if(t===WATER)return true
-  if(!_bridgesOpen&&t===PATH&&BARRIER_TILES.has(`${r},${c}`))return true
   if(t>=B_INCOME){
     const bi=BUILDING_DEFS.findIndex(b=>b.tile===t)
     if(bi<0)return false
@@ -450,6 +443,24 @@ function resolveMove(cx:number,cy:number,dx:number,dy:number){
   const hy=isBlocking(cx+pad,cy+dy+pad)||isBlocking(cx-pad,cy+dy+pad)||isBlocking(cx+pad,cy+dy-pad)||isBlocking(cx-pad,cy+dy-pad)
   return{x:Math.max(PLAYER_R,Math.min(MAP_W*TS-PLAYER_R,hx?cx:cx+dx)),y:Math.max(PLAYER_R,Math.min(MAP_H*TS-PLAYER_R,hy?cy:cy+dy))}
 }
+// Movement delta for this frame: click-and-hold pointer target takes priority
+// over WASD/arrows (mirrors the diagonal-move feel — held pointer drives the
+// player straight toward the world point last reported by the mouse/touch).
+function computeMoveDelta(keys:Set<string>,spd:number,pointerDown:boolean,px:number,py:number,tx:number,ty:number){
+  if(pointerDown){
+    const ddx=tx-px,ddy=ty-py,dist=Math.hypot(ddx,ddy)
+    if(dist<2)return{dx:0,dy:0}
+    const s=Math.min(spd,dist)
+    return{dx:ddx/dist*s,dy:ddy/dist*s}
+  }
+  let dx=0,dy=0
+  if(keys.has("ArrowLeft")||keys.has("a")||keys.has("A"))dx-=spd
+  if(keys.has("ArrowRight")||keys.has("d")||keys.has("D"))dx+=spd
+  if(keys.has("ArrowUp")||keys.has("w")||keys.has("W"))dy-=spd
+  if(keys.has("ArrowDown")||keys.has("s")||keys.has("S"))dy+=spd
+  if(dx&&dy){dx*=0.707;dy*=0.707}
+  return{dx,dy}
+}
 
 // ─── NPC system ───────────────────────────────────────────────────────────────
 interface NpcState{
@@ -461,12 +472,12 @@ interface NpcState{
   isMarket:boolean
 }
 function initNpcs(variant:MapVariant):NpcState[]{
-  const W=2, isL3=variant==="lesson3"
+  const W=2
   const npcs:NpcState[]=[
     {x:43.5*TS,y:34.5*TS,tx:43.5*TS,ty:34.5*TS,wait:60,color:"#8b5cf6",border:"#6d28d9",bx1:(39-W)*TS,bx2:(44+1+W)*TS,by1:(29-W)*TS,by2:(33+1+W)*TS,tradesDone:0,tradeTimer:0,isTipNpc:false,tipUsed:false,isMarket:false},
     {x:11.5*TS,y:19.5*TS,tx:11.5*TS,ty:19.5*TS,wait:60,color:"#f59e0b",border:"#b45309",bx1:(5-W)*TS,bx2:(10+1+W)*TS,by1:(14-W)*TS,by2:(18+1+W)*TS,tradesDone:0,tradeTimer:0,isTipNpc:false,tipUsed:false,isMarket:false},
     {x:67.5*TS,y:14.5*TS,tx:67.5*TS,ty:14.5*TS,wait:60,color:"#ef4444",border:"#b91c1c",bx1:(70-W)*TS,bx2:(75+1+W)*TS,by1:(9-W)*TS,by2:(13+1+W)*TS,tradesDone:0,tradeTimer:0,isTipNpc:false,tipUsed:false,isMarket:false},
-    {x:67.5*TS,y:48.5*TS,tx:67.5*TS,ty:48.5*TS,wait:60,color:"#10b981",border:"#065f46",bx1:(70-W)*TS,bx2:(75+1+W)*TS,by1:(43-W)*TS,by2:(47+1+W)*TS,tradesDone:0,tradeTimer:0,isTipNpc:!isL3,tipUsed:false,isMarket:isL3},
+    {x:67.5*TS,y:48.5*TS,tx:67.5*TS,ty:48.5*TS,wait:60,color:"#10b981",border:"#065f46",bx1:(70-W)*TS,bx2:(75+1+W)*TS,by1:(43-W)*TS,by2:(47+1+W)*TS,tradesDone:0,tradeTimer:0,isTipNpc:true,tipUsed:false,isMarket:false},
   ]
   if(variant==="lessonInvest"){
     // Port Trader (index 4) — stays near the dock on the north shore
@@ -572,6 +583,7 @@ function updateBloo(bloo:BlooState,variant:MapVariant,stage:number,px:number,py:
   let homeX=41*TS,homeY=22*TS
   if(variant==="lesson1"&&stage>L1_HARVEST){homeX=(GOV_HOME_C+0.5)*TS;homeY=(GOV_HOME_R+2.5)*TS}
   if(variant==="lessonInvest"&&stage>=LIV_TRADE){homeX=LIV_PORT_X;homeY=LIV_PORT_Y+TS}
+  if(variant==="lessonFarm"){homeX=(FARM_PLOT_C1+FARM_PLOT_C2)/2*TS;homeY=(FARM_PLOT_R1+FARM_PLOT_R2)/2*TS}
   if(bloo.wait>0){bloo.wait--;return}
   const dx=bloo.tx-bloo.x,dy=bloo.ty-bloo.y,dist=Math.sqrt(dx*dx+dy*dy)
   if(dist<2){
@@ -598,6 +610,56 @@ function drawBloo(ctx:CanvasRenderingContext2D,bloo:BlooState,camX:number,camY:n
   ctx.fillText("B",sx,sy)
   ctx.fillStyle="rgba(0,0,0,0.65)";ctx.beginPath();ctx.roundRect(sx-24,sy-S-22,48,17,3);ctx.fill()
   ctx.fillStyle="#93c5fd";ctx.font="bold 9px sans-serif";ctx.fillText("Bloo",sx,sy-S-13)
+}
+
+// ─── Bink (lessonFarm) ────────────────────────────────────────────────────────
+// Fixed spot guarding the farm plot — no wandering, so he's always easy to find.
+function drawBink(ctx:CanvasRenderingContext2D,camX:number,camY:number,nearPlayer:boolean){
+  const sx=Math.round(FARM_BINK_X-camX),sy=Math.round(FARM_BINK_Y-camY),S=11
+  ctx.fillStyle="rgba(0,0,0,0.22)";ctx.fillRect(sx-S+2,sy+S,S*2-2,3)
+  ctx.fillStyle="#a855f7";ctx.fillRect(sx-S,sy-S,S*2,S*2)
+  ctx.fillStyle="rgba(255,255,255,0.4)";ctx.fillRect(sx-S+1,sy-S+1,S-1,S-1)
+  ctx.strokeStyle=nearPlayer?"#e9d5ff":"#7e22ce";ctx.lineWidth=nearPlayer?2.5:1.5
+  ctx.strokeRect(sx-S,sy-S,S*2,S*2)
+  ctx.fillStyle="white";ctx.font="bold 12px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
+  ctx.fillText("Bi",sx,sy)
+  ctx.fillStyle="rgba(0,0,0,0.65)";ctx.beginPath();ctx.roundRect(sx-24,sy-S-22,48,17,3);ctx.fill()
+  ctx.fillStyle="#e9d5ff";ctx.font="bold 9px sans-serif";ctx.fillText("Bink",sx,sy-S-13)
+}
+function drawFarmPlot(ctx:CanvasRenderingContext2D,camX:number,camY:number,digHits:boolean[],imgs:ImgMap){
+  const pathTile=imgs["path4"]
+  for(let r=FARM_PLOT_R1;r<=FARM_PLOT_R2;r++){
+    for(let c=FARM_PLOT_C1;c<=FARM_PLOT_C2;c++){
+      const sx=c*TS-camX, sy=r*TS-camY
+      if(pathTile){
+        blit(ctx,pathTile,sx,sy)
+        ctx.save(); ctx.globalAlpha=0.55; ctx.fillStyle=FARM_SOIL_TILE_COLOR
+        ctx.fillRect(sx,sy,TS,TS); ctx.restore()
+      }else{
+        ctx.fillStyle=FARM_SOIL_TILE_COLOR; ctx.fillRect(sx,sy,TS,TS)
+      }
+    }
+  }
+  const x=FARM_PLOT_C1*TS-camX, y=FARM_PLOT_R1*TS-camY
+  const w=(FARM_PLOT_C2-FARM_PLOT_C1+1)*TS, h=(FARM_PLOT_R2-FARM_PLOT_R1+1)*TS
+  ctx.strokeStyle="#4a3118"; ctx.lineWidth=4; ctx.strokeRect(x,y,w,h)
+  for(let i=0;i<FARM_DIG_SPOTS.length;i++){
+    const d=FARM_DIG_SPOTS[i]
+    const dsx=d.wx-camX, dsy=d.wy-camY
+    ctx.beginPath(); ctx.arc(dsx,dsy,9,0,Math.PI*2)
+    ctx.fillStyle=digHits[i]?"#22c55e":"#3a2410"; ctx.fill()
+    if(digHits[i]){
+      ctx.fillStyle="#fff";ctx.font="bold 11px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
+      ctx.fillText("✓",dsx,dsy)
+    }
+  }
+}
+function drawBinkMachine(ctx:CanvasRenderingContext2D,camX:number,camY:number){
+  const sx=FARM_MACHINE_X-camX, sy=FARM_MACHINE_Y-camY, w=30,h=38
+  ctx.fillStyle="#f97316"; ctx.fillRect(sx-w/2,sy-h/2,w,h)
+  ctx.strokeStyle="#9a3412"; ctx.lineWidth=2.5; ctx.strokeRect(sx-w/2,sy-h/2,w,h)
+  ctx.fillStyle="#fff"; ctx.font="bold 14px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle"
+  ctx.fillText("💰",sx,sy)
 }
 
 // ─── Foliage ──────────────────────────────────────────────────────────────────
@@ -646,60 +708,24 @@ function drawFoliage(ctx:CanvasRenderingContext2D,foliage:FoliageNode[],camX:num
   }
 }
 
-// ─── Bridge detection ─────────────────────────────────────────────────────────
-function isBridge(r:number,c:number):boolean{
-  if(MAP[r][c]!==PATH)return false
-  // adjacent water → definitely a bridge
-  if([[-1,0],[1,0],[0,-1],[0,1]].some(([dr,dc])=>{
-    const nr=r+dr,nc=c+dc
-    if(nr<0||nr>=MAP_H||nc<0||nc>=MAP_W)return false
-    return MAP[nr][nc]===WATER
-  }))return true
-  // PATH in water zone surrounded by other bridge tiles (e.g. L-bridge corners)
-  return !isLand(r,c)
-}
-
 // ─── Tile drawing helpers ─────────────────────────────────────────────────────
 function blit(ctx:CanvasRenderingContext2D,img:HTMLImageElement,sx:number,sy:number){ctx.drawImage(img,sx,sy,TS,TS)}
 function fbGrass(ctx:CanvasRenderingContext2D,sx:number,sy:number,r:number,c:number){const v=((r*17+c*31)%5)*6;ctx.fillStyle=`rgb(${72+v},${140+v},${48+v})`;ctx.fillRect(sx,sy,TS,TS)}
 function fbWater(ctx:CanvasRenderingContext2D,sx:number,sy:number){ctx.fillStyle="#1565a8";ctx.fillRect(sx,sy,TS,TS)}
 function fbPath(ctx:CanvasRenderingContext2D,sx:number,sy:number){ctx.fillStyle="#c9a96e";ctx.fillRect(sx,sy,TS,TS);ctx.fillStyle="#b99558";ctx.fillRect(sx+1,sy+1,TS-2,TS-2)}
-function drawBridgeOverlay(ctx:CanvasRenderingContext2D,sx:number,sy:number,r:number,c:number,imgs:ImgMap){
-  const hasLeft  = c > 0        && MAP[r][c-1] === PATH
-  const hasRight = c < MAP_W-1  && MAP[r][c+1] === PATH
-  const hasUp    = r > 0        && MAP[r-1][c] === PATH
-  const hasDown  = r < MAP_H-1  && MAP[r+1][c] === PATH
-
-  const hCount = (hasLeft?1:0)+(hasRight?1:0)
-  const vCount = (hasUp?1:0)+(hasDown?1:0)
-
-  // Always pick exactly ONE piece — no overlapping SVGs.
-  // Corners (mixed H+V) default to the vertical end-cap that faces the horizontal arm.
-  let key: string
-  if(hCount > vCount){
-    // Purely horizontal or T-junction dominated by H
-    key = (hasLeft&&hasRight) ? "bridge_h_mid" : hasRight ? "bridge_h_left" : "bridge_h_right"
-  } else {
-    // Vertical, corner (equal), or isolated — use V piece
-    key = (hasUp&&hasDown) ? "bridge_v_mid" : hasDown ? "bridge_v_top" : "bridge_v_bot"
-  }
-
-  if(imgs[key]){ ctx.drawImage(imgs[key],sx,sy,TS,TS); return }
-
-  // Canvas fallback (SVG not yet loaded)
-  const isV = !(hCount > vCount)
-  const DARK="#3D1E08",PLANK="#8B5E3C",MID="#A87040",LITE="#C49055",ROPE="#6B4226"
-  if(!isV){
-    const margin=7,bh=TS-margin*2,lh=Math.floor((bh-2)/3)
-    ctx.fillStyle=DARK;ctx.fillRect(sx,sy+margin,TS,bh)
-    for(let i=0;i<3;i++){const py=sy+margin+1+i*(lh+1);ctx.fillStyle=PLANK;ctx.fillRect(sx,py,TS,lh);ctx.fillStyle=MID;ctx.fillRect(sx,py+1,TS,1);ctx.fillStyle=LITE;ctx.fillRect(sx,py+2,TS,1);ctx.fillStyle=DARK;ctx.fillRect(sx,py+lh-1,TS,1)}
-    ctx.fillStyle=ROPE;ctx.fillRect(sx,sy+margin,TS,1);ctx.fillRect(sx,sy+margin+bh-1,TS,1);ctx.fillRect(sx,sy+margin,2,bh);ctx.fillRect(sx+TS-2,sy+margin,2,bh)
-  }else{
-    const margin=7,bw=TS-margin*2,lw=Math.floor((bw-2)/3)
-    ctx.fillStyle=DARK;ctx.fillRect(sx+margin,sy,bw,TS)
-    for(let i=0;i<3;i++){const px=sx+margin+1+i*(lw+1);ctx.fillStyle=PLANK;ctx.fillRect(px,sy,lw,TS);ctx.fillStyle=MID;ctx.fillRect(px+1,sy,1,TS);ctx.fillStyle=LITE;ctx.fillRect(px+2,sy,1,TS);ctx.fillStyle=DARK;ctx.fillRect(px+lw-1,sy,1,TS)}
-    ctx.fillStyle=ROPE;ctx.fillRect(sx+margin,sy,bw,1);ctx.fillRect(sx+margin,sy+TS-1,bw,1);ctx.fillRect(sx+margin,sy,1,TS);ctx.fillRect(sx+margin+bw-1,sy,1,TS)
-  }
+function tintGrassEdge(ctx:CanvasRenderingContext2D,sx:number,sy:number){
+  ctx.save()
+  ctx.globalCompositeOperation="multiply"
+  ctx.fillStyle="rgb(164,198,57)"
+  ctx.fillRect(sx,sy,TS,TS)
+  ctx.restore()
+}
+function tintPathEdge(ctx:CanvasRenderingContext2D,sx:number,sy:number){
+  ctx.save()
+  ctx.globalCompositeOperation="multiply"
+  ctx.fillStyle="rgb(201,180,133)"
+  ctx.fillRect(sx,sy,TS,TS)
+  ctx.restore()
 }
 function drawBuildings(ctx:CanvasRenderingContext2D,camX:number,camY:number,cw:number,ch:number,imgs:ImgMap){
   for(const b of BUILDING_DEFS){
@@ -814,7 +840,7 @@ function drawTopBar(ctx:CanvasRenderingContext2D,cw:number,sustenance:number,inv
     ctx.fillText("ROADS",tx+pad,LBL_Y)
     ctx.fillStyle="#16a34a";ctx.beginPath();ctx.arc(tx+pad+6,BAR_Y+44,5,0,Math.PI*2);ctx.fill()
     ctx.fillStyle="#16a34a";ctx.font="11px sans-serif";ctx.textBaseline="middle"
-    ctx.fillText("Bridges Open",tx+pad+16,BAR_Y+44)
+    ctx.fillText("Roads Open",tx+pad+16,BAR_Y+44)
     ctx.fillStyle="rgba(0,0,0,0.35)"
     ctx.fillText("— Coming soon",tx+pad,VAL_Y)
   }
@@ -915,60 +941,6 @@ function drawSellMenu(ctx:CanvasRenderingContext2D,cw:number,ch:number,npcName:s
   ctx.fillText("[X] Cancel",px+pw-20,py+ph-20)
 }
 
-// ─── Market menu (lesson 3) ───────────────────────────────────────────────────
-function drawMarketMenu(ctx:CanvasRenderingContext2D,cw:number,ch:number,coins:number){
-  ctx.fillStyle="rgba(0,0,0,0.65)";ctx.fillRect(0,0,cw,ch)
-  const pw=Math.min(520,cw-40),ph=310
-  const px=Math.round(cw/2-pw/2),py=Math.round(ch/2-ph/2)
-  ctx.fillStyle="#ffffff";ctx.beginPath();ctx.roundRect(px,py,pw,ph,16);ctx.fill()
-  ctx.strokeStyle="#10b981";ctx.lineWidth=2.5;ctx.beginPath();ctx.roundRect(px,py,pw,ph,16);ctx.stroke()
-  ctx.fillStyle="#065f46";ctx.font="bold 16px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
-  ctx.fillText("🏪  Island Market",cw/2,py+24)
-  ctx.strokeStyle="rgba(16,185,129,0.25)";ctx.lineWidth=1
-  ctx.beginPath();ctx.moveTo(px+16,py+40);ctx.lineTo(px+pw-16,py+40);ctx.stroke()
-  const ITEMS=[
-    {emoji:"🍞",name:"Freshly Baked Bread",price:`${L3_BREAD_LISTED} 🪙`,available:true},
-    {emoji:"🥩",name:"Salted Fish",price:"8 🪙",available:false},
-    {emoji:"🍎",name:"Apple Cider",price:"3 🪙",available:false},
-  ]
-  let iy=py+56
-  for(const item of ITEMS){
-    ctx.globalAlpha=item.available?1:0.35
-    if(item.available){ctx.fillStyle="rgba(16,185,129,0.1)";ctx.beginPath();ctx.roundRect(px+12,iy-13,pw-24,30,8);ctx.fill()}
-    ctx.fillStyle=item.available?"#065f46":"#6b7280"
-    ctx.font=item.available?"bold 13px sans-serif":"13px sans-serif"
-    ctx.textAlign="left";ctx.fillText(`${item.emoji}  ${item.name}`,px+22,iy+2)
-    ctx.textAlign="right"
-    if(item.available){ctx.fillStyle="#065f46";ctx.font="bold 13px sans-serif";ctx.fillText(item.price,px+pw-18,iy+2)}
-    else{ctx.fillStyle="#9ca3af";ctx.font="11px sans-serif";ctx.fillText("Coming soon",px+pw-18,iy+2)}
-    ctx.globalAlpha=1;iy+=34
-  }
-  ctx.strokeStyle="rgba(16,185,129,0.2)";ctx.lineWidth=1
-  ctx.beginPath();ctx.moveTo(px+16,iy+4);ctx.lineTo(px+pw-16,iy+4);ctx.stroke()
-  iy+=16
-  let bgColor:string,line1:string,line2:string,textColor:string,line2Color:string
-  if(coins<L3_BREAD_LISTED){
-    bgColor="rgba(239,68,68,0.08)";textColor="#dc2626";line2Color="#6b7280"
-    line1=`You need ${L3_BREAD_TOTAL} coins total. You only have ${coins}.`
-    line2=`Sell more berries to the villagers! (${L3_NPC_BERRIES_COST} berries = 1 coin)`
-  }else if(coins===L3_BREAD_LISTED){
-    bgColor="rgba(251,146,60,0.1)";textColor="#ea580c";line2Color="#6b7280"
-    line1=`⚠️  Bread is ${L3_BREAD_LISTED} coins... but there's a ${L3_BREAD_TAX}-coin SALES TAX!`
-    line2=`You need ${L3_BREAD_TOTAL} coins total. Go earn 1 more coin!`
-  }else{
-    bgColor="rgba(16,185,129,0.1)";textColor="#065f46";line2Color="#374151"
-    line1=`✅  ${L3_BREAD_LISTED} coins + ${L3_BREAD_TAX} coin sales tax = ${L3_BREAD_TOTAL} total.`
-    line2="Press [Z] to buy your bread!"
-  }
-  ctx.fillStyle=bgColor;ctx.beginPath();ctx.roundRect(px+12,iy,pw-24,54,10);ctx.fill()
-  ctx.fillStyle=textColor;ctx.font="bold 13px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
-  ctx.fillText(line1,cw/2,iy+18)
-  ctx.fillStyle=line2Color;ctx.font="12px sans-serif"
-  ctx.fillText(line2,cw/2,iy+38)
-  ctx.fillStyle="#94a3b8";ctx.font="11px sans-serif"
-  ctx.fillText("[X] Close",cw/2,py+ph-14)
-}
-
 // ─── Notification banner ──────────────────────────────────────────────────────
 function drawNotifBanner(ctx:CanvasRenderingContext2D,cw:number,ch:number,text:string,alpha:number){
   ctx.save();ctx.globalAlpha=alpha
@@ -978,24 +950,6 @@ function drawNotifBanner(ctx:CanvasRenderingContext2D,cw:number,ch:number,text:s
   ctx.strokeStyle="#4ade80";ctx.lineWidth=1.5;ctx.beginPath();ctx.roundRect(bx,by,tw,38,6);ctx.stroke()
   ctx.fillStyle="#86efac";ctx.fillText(text,cw/2,by+19)
   ctx.restore()
-}
-
-// ─── Lesson complete (lesson 3 canvas overlay) ────────────────────────────────
-function drawLessonCompleteL3(ctx:CanvasRenderingContext2D,cw:number,ch:number){
-  ctx.fillStyle="rgba(0,0,0,0.72)";ctx.fillRect(0,0,cw,ch)
-  const pw=440,ph=280,px=Math.round(cw/2-pw/2),py=Math.round(ch/2-ph/2)
-  ctx.fillStyle="#ffffff";ctx.beginPath();ctx.roundRect(px,py,pw,ph,16);ctx.fill()
-  ctx.strokeStyle="#4ade80";ctx.lineWidth=2.5;ctx.beginPath();ctx.roundRect(px,py,pw,ph,16);ctx.stroke()
-  ctx.textAlign="center";ctx.textBaseline="middle"
-  ctx.fillStyle="#065f46";ctx.font="bold 32px sans-serif";ctx.fillText("🍞 You bought bread!",cw/2,py+52)
-  ctx.fillStyle="#374151";ctx.font="15px sans-serif"
-  ctx.fillText(`Listed price: ${L3_BREAD_LISTED} coins + ${L3_BREAD_TAX} coin sales tax`,cw/2,py+100)
-  ctx.fillStyle="#ea580c";ctx.font="bold 17px sans-serif"
-  ctx.fillText(`= ${L3_BREAD_TOTAL} coins total`,cw/2,py+132)
-  ctx.fillStyle="#4b5563";ctx.font="13px sans-serif"
-  ctx.fillText("That extra coin went to the government — that's sales tax.",cw/2,py+170)
-  ctx.fillStyle="#94a3b8";ctx.font="12px sans-serif"
-  ctx.fillText("[Z] Continue",cw/2,py+220)
 }
 
 // ─── Day-over overlay ─────────────────────────────────────────────────────────
@@ -1199,11 +1153,13 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
     }, 3000)
   }
 
-  const stageComplete=variant==="lesson1"?L1_COMPLETE:variant==="lessonBudget"?LB_COMPLETE:variant==="lessonLoans"?LL_COMPLETE:variant==="lessonInvest"?LIV_COMPLETE:L3_COMPLETE
+  const stageComplete=variant==="lesson1"?L1_COMPLETE:variant==="lessonBudget"?LB_COMPLETE:variant==="lessonLoans"?LL_COMPLETE:variant==="lessonInvest"?LIV_COMPLETE:FARM_COMPLETE
 
   const stateRef=useRef({
     px: 38*TS, py: 22*TS,
     keys: new Set<string>(),
+    pointerDown: false as boolean,
+    pointerWX: 0 as number, pointerWY: 0 as number,
     frame: 0, raf: 0,
     imgs: null as ImgMap|null,
     npcs: initNpcs(variant),
@@ -1225,10 +1181,6 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
     govArrived: false as boolean,
     govTaxAmount: 0 as number,
     sellMenu: null as SellMenuState|null,
-    // lesson 3 fields
-    activeConversation: null as {npcIdx:number;phase:number;line:string}|null,
-    marketOpen: false as boolean,
-    breadDismissed: false as boolean,
     // lesson budget fields
     houseSaleOpen: false as boolean,
     // lesson invest fields
@@ -1249,6 +1201,13 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
     deathDropped: {berries:0,coins:0},
     deathLost: {berries:0,coins:0},
     sprintTimer: 0 as number,
+    // lesson farm fields
+    binkDialogIdx: 0 as number,
+    farmChoiceIdx: 0 as number,
+    farmChosenId: null as Phase1ChoiceID|null,
+    farmDigHits: [false,false,false] as boolean[],
+    farmState: createInitialFarmPlotState(),
+    farmRevealIdx: 0 as number,
   })
 
   useEffect(()=>{
@@ -1270,11 +1229,8 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
         saveGameLesson("investIntroCompleted",inv.coins,inv.berries).catch(()=>{})
         setFinalCoins(inv.coins)
         triggerFadeOut(()=>setLessonDone(true))
-      }else if(variant==="lessonTax"){
-        saveGameLesson("taxBracketsGameCompleted",inv.coins,inv.berries).catch(()=>{})
-        triggerFadeOut(()=>router.push("/learn"))
       }else{
-        saveGameLesson("salesTaxGameCompleted",inv.coins,inv.berries).catch(()=>{})
+        saveGameLesson("farmPhase1Completed",inv.coins,inv.berries).catch(()=>{})
         triggerFadeOut(()=>router.push("/learn"))
       }
     }
@@ -1301,6 +1257,52 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
     window.addEventListener("keydown",onDown)
     window.addEventListener("keyup",onUp)
 
+    // Click-and-hold pointer movement: press down anywhere on the map and the
+    // player walks toward that point (tracking drag) until you release.
+    const pointerToWorld=(clientX:number,clientY:number)=>{
+      const rect=canvas.getBoundingClientRect()
+      const sx=clientX-rect.left,sy=clientY-rect.top
+      const cw=canvas.offsetWidth,ch=canvas.offsetHeight
+      const s=stateRef.current
+      const camX=Math.max(0,Math.min(s.px-cw/2,MAP_W*TS-cw))
+      const camY=Math.max(0,Math.min(s.py-ch/2,MAP_H*TS-ch))
+      return{wx:sx+camX,wy:sy+camY}
+    }
+    let activePointerId:number|null=null
+    const onPointerDown=(e:PointerEvent)=>{
+      if(e.button!==undefined&&e.button!==0)return
+      if(pausedRef.current)return
+      // On iOS/Android a held touch on a focusable element can trigger the
+      // text-selection callout or a native scroll/zoom gesture, which cancels
+      // the drag — preventDefault + capture stop that from hijacking the hold.
+      e.preventDefault()
+      try{canvas.setPointerCapture(e.pointerId)}catch{}
+      activePointerId=e.pointerId
+      const{wx,wy}=pointerToWorld(e.clientX,e.clientY)
+      stateRef.current.pointerDown=true
+      stateRef.current.pointerWX=wx
+      stateRef.current.pointerWY=wy
+    }
+    const onPointerMove=(e:PointerEvent)=>{
+      if(!stateRef.current.pointerDown)return
+      if(activePointerId!==null&&e.pointerId!==activePointerId)return
+      e.preventDefault()
+      const{wx,wy}=pointerToWorld(e.clientX,e.clientY)
+      stateRef.current.pointerWX=wx
+      stateRef.current.pointerWY=wy
+    }
+    const onPointerUp=(e:PointerEvent)=>{
+      if(activePointerId!==null&&e.pointerId!==activePointerId)return
+      activePointerId=null
+      stateRef.current.pointerDown=false
+    }
+    const onContextMenu=(e:MouseEvent)=>e.preventDefault()
+    canvas.addEventListener("pointerdown",onPointerDown)
+    canvas.addEventListener("pointermove",onPointerMove,{passive:false})
+    window.addEventListener("pointerup",onPointerUp)
+    window.addEventListener("pointercancel",onPointerUp)
+    canvas.addEventListener("contextmenu",onContextMenu)
+
     ctx.fillStyle="#1a3a2a";ctx.fillRect(0,0,canvas.offsetWidth,canvas.offsetHeight)
     ctx.fillStyle="white";ctx.font="bold 18px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
     ctx.fillText("Loading map…",canvas.offsetWidth/2,canvas.offsetHeight/2)
@@ -1315,8 +1317,6 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
         const s=stateRef.current
         s.frame++
         const{keys}=s
-
-        _bridgesOpen=true
 
         // ── Sustenance drain ───────────────────────────────────────────────
         if(!s.dayOver&&s.gameStage<stageComplete&&!pausedRef.current){
@@ -1352,7 +1352,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
 
         // ── Harvest [Z] ────────────────────────────────────────────────────
         if(s.harvestCooldown>0)s.harvestCooldown--
-        const noMenu=(variant==="lesson1"||variant==="lessonBudget"||variant==="lessonLoans")?s.sellMenu===null:variant==="lessonInvest"?!s.livTradeMenu:!s.marketOpen
+        const noMenu=(variant==="lesson1"||variant==="lessonBudget"||variant==="lessonLoans")?s.sellMenu===null:variant==="lessonInvest"?!s.livTradeMenu:true
         if((keys.has("z")||keys.has("Z"))&&!s.dayOver&&s.harvestCooldown===0&&nearFoliageIdx>=0&&noMenu){
           s.inventory.berries+=HARVEST_BERRIES
           s.harvestCooldown=HARVEST_COOLDOWN
@@ -1498,12 +1498,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
 
           // movement — flat SPEED, no sustenance penalty
           if(!s.dayOver&&s.gameStage<L1_COMPLETE&&!anyDialogue){
-            let dx=0,dy=0
-            if(keys.has("ArrowLeft")||keys.has("a")||keys.has("A"))dx-=spd
-            if(keys.has("ArrowRight")||keys.has("d")||keys.has("D"))dx+=spd
-            if(keys.has("ArrowUp")||keys.has("w")||keys.has("W"))dy-=spd
-            if(keys.has("ArrowDown")||keys.has("s")||keys.has("S"))dy+=spd
-            if(dx&&dy){dx*=0.707;dy*=0.707}
+            const{dx,dy}=computeMoveDelta(keys,spd,s.pointerDown,s.px,s.py,s.pointerWX,s.pointerWY)
             if(dx||dy){
               const n=resolveMove(s.px,s.py,dx,dy)
               let nx=n.x,ny=n.y
@@ -1605,12 +1600,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
 
           // movement
           if(!s.dayOver&&s.gameStage<LB_COMPLETE&&!anyDialogue){
-            let dx=0,dy=0
-            if(keys.has("ArrowLeft")||keys.has("a")||keys.has("A"))dx-=spd
-            if(keys.has("ArrowRight")||keys.has("d")||keys.has("D"))dx+=spd
-            if(keys.has("ArrowUp")||keys.has("w")||keys.has("W"))dy-=spd
-            if(keys.has("ArrowDown")||keys.has("s")||keys.has("S"))dy+=spd
-            if(dx&&dy){dx*=0.707;dy*=0.707}
+            const{dx,dy}=computeMoveDelta(keys,spd,s.pointerDown,s.px,s.py,s.pointerWX,s.pointerWY)
             if(dx||dy){
               const n=resolveMove(s.px,s.py,dx,dy);let nx=n.x,ny=n.y
               for(const fn of s.foliage){
@@ -1714,12 +1704,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
 
           // movement
           if(!s.dayOver&&s.gameStage<LL_COMPLETE&&!anyDialogue){
-            let dx=0,dy=0
-            if(keys.has("ArrowLeft")||keys.has("a")||keys.has("A"))dx-=spd
-            if(keys.has("ArrowRight")||keys.has("d")||keys.has("D"))dx+=spd
-            if(keys.has("ArrowUp")||keys.has("w")||keys.has("W"))dy-=spd
-            if(keys.has("ArrowDown")||keys.has("s")||keys.has("S"))dy+=spd
-            if(dx&&dy){dx*=0.707;dy*=0.707}
+            const{dx,dy}=computeMoveDelta(keys,spd,s.pointerDown,s.px,s.py,s.pointerWX,s.pointerWY)
             if(dx||dy){
               const n=resolveMove(s.px,s.py,dx,dy);let nx=n.x,ny=n.y
               for(const fn of s.foliage){
@@ -1829,12 +1814,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
 
           // movement
           if(!s.dayOver&&s.gameStage<LIV_COMPLETE&&!anyDialogue){
-            let dx=0,dy=0
-            if(keys.has("ArrowLeft")||keys.has("a")||keys.has("A"))dx-=spd
-            if(keys.has("ArrowRight")||keys.has("d")||keys.has("D"))dx+=spd
-            if(keys.has("ArrowUp")||keys.has("w")||keys.has("W"))dy-=spd
-            if(keys.has("ArrowDown")||keys.has("s")||keys.has("S"))dy+=spd
-            if(dx&&dy){dx*=0.707;dy*=0.707}
+            const{dx,dy}=computeMoveDelta(keys,spd,s.pointerDown,s.px,s.py,s.pointerWX,s.pointerWY)
             if(dx||dy){
               const n=resolveMove(s.px,s.py,dx,dy);let nx=n.x,ny=n.y
               for(const fn of s.foliage){
@@ -1848,102 +1828,111 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           }
 
         // ─────────────────────────────────────────────────────────────────
-        // LESSON 3 GAME FLOW
+        // LESSON FARM GAME FLOW (dynamic Income stream — "farm" choice)
         // ─────────────────────────────────────────────────────────────────
-        }else{
+        }else if(variant==="lessonFarm"){
           const blooDist=Math.hypot(s.px-s.bloo.x,s.py-s.bloo.y)
           const nearBloo=blooDist<TS*2.5
-          const blooDialogue=nearBloo&&s.gameStage===L3_INTRO
-          const anyDialogue=blooDialogue||s.activeConversation!==null||s.marketOpen
+          const nearBink=Math.hypot(s.px-FARM_BINK_X,s.py-FARM_BINK_Y)<FARM_INTERACT
+          const blooDialogue=nearBloo&&s.gameStage===FARM_TALK_BLOO
+          const binkDialogue=nearBink&&s.gameStage===FARM_FIND_BINK
+          const choiceOpen=s.gameStage===FARM_CHOICE
+          const trapDialogue=s.gameStage===FARM_TRAP_OUTCOME
+          const revealDialogue=s.gameStage===FARM_PLANT_REVEAL
+          const anyDialogue=blooDialogue||binkDialogue||choiceOpen||trapDialogue||revealDialogue
 
-          if(!blooDialogue&&!s.marketOpen)updateBloo(s.bloo,variant,s.gameStage,s.px,s.py)
-
-          // [X] close market
-          if((keys.has("x")||keys.has("X"))&&s.marketOpen){
-            s.marketOpen=false;keys.delete("x");keys.delete("X")
-          }
+          if(!blooDialogue)updateBloo(s.bloo,variant,s.gameStage,s.px,s.py)
+          updateNpcs(s.npcs)
 
           const eDown=keys.has("z")||keys.has("Z")
           let eUsed=false
           const consumeE=()=>{eUsed=true;keys.delete("z");keys.delete("Z")}
 
-          // 0a. bread screen shown — wait for Z to continue
-          if(eDown&&!eUsed&&s.gameStage===L3_COMPLETE&&!s.breadDismissed){
-            s.breadDismissed=true
-            if(!s.completionCalled){s.completionCalled=true;completeRef.current?.()}
+          // 1. Bloo intro — sends the player to find Bink
+          if(eDown&&!eUsed&&blooDialogue){
+            s.dialogIdx++
+            if(s.dialogIdx>=FARM_BLOO_INTRO.length){s.gameStage=FARM_FIND_BINK;s.dialogIdx=0}
             consumeE()
           }
-
-          // 0. market open — buy bread
-          if(eDown&&!eUsed&&s.marketOpen){
-            if(s.inventory.coins>=L3_BREAD_TOTAL){
-              s.inventory.coins-=L3_BREAD_TOTAL
-              s.marketOpen=false
-              s.gameStage=L3_COMPLETE
-              s.notifText="🍞 Bread purchased! (+1 coin was sales tax)";s.notifTimer=180
-            }else{
-              s.marketOpen=false
-            }
+          // 2. Bink's pitch — ends by opening the real choice (not a scroll)
+          if(eDown&&!eUsed&&binkDialogue){
+            s.binkDialogIdx++
+            if(s.binkDialogIdx>=FARM_BINK_INTRO.length){s.gameStage=FARM_CHOICE;s.farmChoiceIdx=0}
             consumeE()
           }
-
-          // 1. active NPC conversation
-          if(eDown&&!eUsed&&s.activeConversation!==null){
-            const conv=s.activeConversation
-            if(conv.phase===0){
-              const npc=s.npcs[conv.npcIdx]
-              const canTrade=s.inventory.berries>=L3_NPC_BERRIES_COST&&npc.tradesDone<L3_NPC_MAX_TRADES
-              if(canTrade){
-                s.inventory.berries-=L3_NPC_BERRIES_COST;s.inventory.coins+=1
-                npc.tradesDone++;if(npc.tradeTimer===0)npc.tradeTimer=L3_NPC_BUY_RESET
-                s.activeConversation={npcIdx:conv.npcIdx,phase:1,line:L3_NPC_SOLD[conv.npcIdx]}
-              }else{
-                s.activeConversation=null
-              }
-            }else{
-              s.activeConversation=null
-            }
-            consumeE()
-          }
-
-          // 2. bloo intro dialogue
-          if(eDown&&!eUsed&&nearBloo&&s.gameStage===L3_INTRO){
-            s.dialogIdx++;if(s.dialogIdx>=L3_BLOO_INTRO.length){s.gameStage=L3_EARN;s.dialogIdx=0}
-            consumeE()
-          }
-
-          // 3. open NPC conversation or market
-          if(eDown&&!eUsed&&s.gameStage>=L3_EARN&&s.activeConversation===null&&!s.marketOpen){
-            let nearNpcIdx=-1,nearNpcDist=Infinity
-            for(let i=0;i<s.npcs.length;i++){
-              const d=Math.hypot(s.px-s.npcs[i].x,s.py-s.npcs[i].y)
-              if(d<TS*2.5&&d<nearNpcDist){nearNpcDist=d;nearNpcIdx=i}
-            }
-            if(nearNpcIdx>=0){
-              const npc=s.npcs[nearNpcIdx]
-              if(npc.isMarket){
-                s.marketOpen=true
-              }else{
-                let line:string
-                if(npc.tradesDone>=L3_NPC_MAX_TRADES)line=L3_NPC_FULL[nearNpcIdx]
-                else if(s.inventory.berries<L3_NPC_BERRIES_COST)line=L3_NPC_NOT_ENOUGH[nearNpcIdx]
-                else line=L3_NPC_OFFER[nearNpcIdx]
-                s.activeConversation={npcIdx:nearNpcIdx,phase:0,line}
-              }
+          // 3. Choice navigation + confirm
+          if(choiceOpen){
+            const n=PHASE_1_CONTENT.choices.length
+            if(keys.has("ArrowUp")){s.farmChoiceIdx=(s.farmChoiceIdx+n-1)%n;keys.delete("ArrowUp")}
+            if(keys.has("ArrowDown")){s.farmChoiceIdx=(s.farmChoiceIdx+1)%n;keys.delete("ArrowDown")}
+            if(eDown&&!eUsed){
+              const chosen=PHASE_1_CONTENT.choices[s.farmChoiceIdx]
+              s.farmChosenId=chosen.id
+              if(chosen.id==="1A")s.gameStage=FARM_TASK_LOAN
+              else if(chosen.id==="1B")s.gameStage=FARM_TASK_MACHINE
+              else s.gameStage=FARM_TASK_DIG
               consumeE()
             }
           }
+          // 4. Loan Cabin (Savings Bank) — sign papers, pay for clearing
+          if(eDown&&!eUsed&&s.gameStage===FARM_TASK_LOAN){
+            if(Math.hypot(s.px-ENTRANCES[2].wx,s.py-ENTRANCES[2].wy)<TS*2){
+              const{state:afterChoice}=applyPhase1Choice("1A",s.farmState)
+              const{state:afterClearing}=payForPlotClearing(afterChoice)
+              s.farmState=afterClearing
+              s.gameStage=FARM_PLANT_REVEAL;s.farmRevealIdx=0
+              consumeE()
+            }
+          }
+          // 5. Bink's Fast-Cash machine
+          if(eDown&&!eUsed&&s.gameStage===FARM_TASK_MACHINE){
+            if(Math.hypot(s.px-FARM_MACHINE_X,s.py-FARM_MACHINE_Y)<FARM_INTERACT){
+              const{state:afterChoice}=applyPhase1Choice("1B",s.farmState)
+              const{state:afterClearing}=payForPlotClearing(afterChoice)
+              s.farmState=afterClearing
+              s.gameStage=FARM_TRAP_OUTCOME;s.dialogIdx=0
+              consumeE()
+            }
+          }
+          // 6. Dig spots — scatter berries at all 3
+          if(eDown&&!eUsed&&s.gameStage===FARM_TASK_DIG){
+            for(let i=0;i<FARM_DIG_SPOTS.length;i++){
+              if(!s.farmDigHits[i]&&Math.hypot(s.px-FARM_DIG_SPOTS[i].wx,s.py-FARM_DIG_SPOTS[i].wy)<FARM_INTERACT){
+                s.farmDigHits[i]=true
+                consumeE()
+                if(s.farmDigHits.every(Boolean)){
+                  const{state}=applyPhase1Choice("1C",s.farmState)
+                  s.farmState=state
+                  s.gameStage=FARM_PLANT_REVEAL;s.farmRevealIdx=0
+                }
+                break
+              }
+            }
+          }
+          // 7. Trap outcome dialogue (Bink's machine route, if it didn't cover the cost)
+          if(eDown&&!eUsed&&trapDialogue){
+            s.dialogIdx++
+            if(s.dialogIdx>=farmTrapLines(s.farmState).length){
+              s.gameStage=FARM_COMPLETE
+              if(!s.completionCalled){s.completionCalled=true;completeRef.current?.()}
+            }
+            consumeE()
+          }
+          // 8. Bloo explains the assigned plant — replaces any popup entirely
+          if(eDown&&!eUsed&&revealDialogue){
+            const plant=s.farmState.assignedPlant?PLANT_REGISTRY[s.farmState.assignedPlant]:null
+            const lines=plant?plantRevealLines(plant):["Let's get that plot growing!"]
+            s.farmRevealIdx++
+            if(s.farmRevealIdx>=lines.length){
+              s.gameStage=FARM_COMPLETE
+              if(!s.completionCalled){s.completionCalled=true;completeRef.current?.()}
+            }
+            consumeE()
+          }
 
-          updateNpcs(s.npcs,s.activeConversation?.npcIdx??-1)
-
-          // movement — flat SPEED, no sustenance penalty
-          if(!s.dayOver&&s.gameStage<L3_COMPLETE&&!anyDialogue){
-            let dx=0,dy=0
-            if(keys.has("ArrowLeft")||keys.has("a")||keys.has("A"))dx-=spd
-            if(keys.has("ArrowRight")||keys.has("d")||keys.has("D"))dx+=spd
-            if(keys.has("ArrowUp")||keys.has("w")||keys.has("W"))dy-=spd
-            if(keys.has("ArrowDown")||keys.has("s")||keys.has("S"))dy+=spd
-            if(dx&&dy){dx*=0.707;dy*=0.707}
+          // movement
+          if(!s.dayOver&&s.gameStage<FARM_COMPLETE&&!anyDialogue){
+            const{dx,dy}=computeMoveDelta(keys,spd,s.pointerDown,s.px,s.py,s.pointerWX,s.pointerWY)
             if(dx||dy){
               const n=resolveMove(s.px,s.py,dx,dy)
               let nx=n.x,ny=n.y
@@ -1957,6 +1946,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
               s.px=nx;s.py=ny
             }
           }
+
         }
 
         // ── Pick up nearby drops ───────────────────────────────────────────
@@ -2003,10 +1993,11 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
             else if(t===GRASS){
               if(FLOWER_MAP[r]?.[c]){const img=flowerImg(imgs,r,c);img?blit(ctx,img,sx,sy):fbGrass(ctx,sx,sy,r,c)}
               else{const img=grassImg(imgs,r,c);img?blit(ctx,img,sx,sy):fbGrass(ctx,sx,sy,r,c)}
+              if(GRASS_EDGE[r]?.[c])tintGrassEdge(ctx,sx,sy)
             }
             else if(t===PATH){
-              if(isBridge(r,c)){const wimg=waterImg(imgs,s.frame,r,c);wimg?blit(ctx,wimg,sx,sy):fbWater(ctx,sx,sy);drawBridgeOverlay(ctx,sx,sy,r,c,imgs)}
-              else{const img=pathImg(imgs,r,c);img?blit(ctx,img,sx,sy):fbPath(ctx,sx,sy)}
+              const img=pathImg(imgs,r,c);img?blit(ctx,img,sx,sy):fbPath(ctx,sx,sy)
+              if(PATH_EDGE[r]?.[c])tintPathEdge(ctx,sx,sy)
             }
             else if(t>=B_INCOME){const img=pathImg(imgs,r,c);img?blit(ctx,img,sx,sy):fbPath(ctx,sx,sy)}
           }
@@ -2017,9 +2008,14 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           if(!s.boatGone)drawInvestBoat(ctx,LIV_BOAT_X,s.boatY,s.frame,camX,camY)
         }
 
-        const npcMaxTrades=variant==="lesson1"?L1_NPC_MAX_TRADES:(variant==="lessonBudget"||variant==="lessonLoans")?LB_NPC_MAX_TRADES:variant==="lessonInvest"?LIV_TRADES_NEEDED:L3_NPC_MAX_TRADES
+        const npcMaxTrades=variant==="lesson1"?L1_NPC_MAX_TRADES:variant==="lessonInvest"?LIV_TRADES_NEEDED:LB_NPC_MAX_TRADES
         drawNpcs(ctx,s.npcs,camX,camY,npcMaxTrades)
         if(variant==="lesson1")drawGovernor(ctx,s.gov,camX,camY,s.gameStage===L1_GOV_TAX&&s.govArrived)
+        if(variant==="lessonFarm"){
+          drawFarmPlot(ctx,camX,camY,s.farmDigHits,imgs)
+          drawBinkMachine(ctx,camX,camY)
+          drawBink(ctx,camX,camY,Math.hypot(s.px-FARM_BINK_X,s.py-FARM_BINK_Y)<FARM_INTERACT)
+        }
         drawBloo(ctx,s.bloo,camX,camY,Math.hypot(s.px-s.bloo.x,s.py-s.bloo.y)<TS*2.5)
 
         const nearFoliageNode=nearFoliageIdx>=0?s.foliage[nearFoliageIdx]:null
@@ -2049,17 +2045,24 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           const livLabels=["📍 Talk to Bloo — your guide","🚢 Watch the trade vessel depart",`🪙 Trade at the Port (${s.livTrades}/${LIV_TRADES_NEEDED}) — [Z] near dock`,"✅ Lesson complete!"]
           taskLabel=livLabels[Math.min(s.gameStage,LIV_COMPLETE)]
         }else{
-          if(s.gameStage===L3_INTRO)taskLabel="📍 Talk to Bloo — your guide"
-          else if(s.inventory.coins<L3_BREAD_TOTAL)taskLabel=`:berry: Sell berries for coins (${s.inventory.coins}/${L3_BREAD_TOTAL}) — ${L3_NPC_BERRIES_COST} berries = 1 coin`
-          else taskLabel="🏪 Find the Market Trader (green) — press [Z]"
-          if(s.gameStage===L3_COMPLETE)taskLabel="✅ Lesson complete!"
+          if(s.gameStage===FARM_TALK_BLOO)taskLabel="📍 Talk to Bloo — your guide"
+          else if(s.gameStage===FARM_FIND_BINK)taskLabel="📍 Find Bink and talk to him"
+          else if(s.gameStage===FARM_CHOICE)taskLabel="📍 Make your choice"
+          else if(s.gameStage===FARM_TASK_LOAN)taskLabel="📍 Go to the Savings Bank (Loan Cabin) and press [Z]"
+          else if(s.gameStage===FARM_TASK_MACHINE)taskLabel="📍 Use Bink's Fast-Cash machine — press [Z]"
+          else if(s.gameStage===FARM_TASK_DIG)taskLabel=`📍 Scatter berries at all 3 dig spots [Z] (${s.farmDigHits.filter(Boolean).length}/3)`
+          else if(s.gameStage===FARM_TRAP_OUTCOME||s.gameStage===FARM_PLANT_REVEAL)taskLabel="💬 Talk to Bloo"
+          else taskLabel="✅ Lesson complete!"
         }
         drawTaskSign(ctx,taskLabel,8,8,imgs)
         drawInventoryPanel(ctx,s.inventory,8,90,imgs)
         if(variant==="lessonInvest")drawLivInventory(ctx,8,136,s.livBread,s.livSeeds,s.livWood,s.livSeedTimer)
 
         // ── Bottom prompts ────────────────────────────────────────────────
-        if(variant==="lessonBudget"){
+        // Skipped entirely while paused — a paused backdrop (e.g. behind the
+        // CYOA scroll) should be a quiet idle scene, not popping its stage-0
+        // dialogue box just because gameStage/proximity happen to match.
+        if(!pausedRef.current)if(variant==="lessonBudget"){
           const bdBlooDist=Math.hypot(s.px-s.bloo.x,s.py-s.bloo.y)
           const bdNearBloo=bdBlooDist<TS*2.5
           if(s.sellMenu!==null){
@@ -2189,43 +2192,40 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
             const cdLeft=s.harvestCooldown>0?`  (${(s.harvestCooldown/60).toFixed(1)}s)`:""
             drawPrompt(ctx,cw,ch,`[Z] Harvest ${fn.type==="tree"?"Tree":"Bush"} (+${HARVEST_BERRIES} berries)${cdLeft}`,s.harvestCooldown>0?"#94a3b8":"#1e40af")
           }
-        }else{
-          // lesson 3 prompts
-          const blooDist=Math.hypot(s.px-s.bloo.x,s.py-s.bloo.y)
-          const nearBloo=blooDist<TS*2.5
-          if(s.activeConversation!==null){
-            const conv=s.activeConversation
-            const npc=s.npcs[conv.npcIdx]
-            drawDialogBox(ctx,cw,ch,NPC_NAMES[conv.npcIdx],npc.color,conv.line,conv.phase===1)
-          }else if(nearBloo&&s.gameStage===L3_INTRO){
-            const line=L3_BLOO_INTRO[Math.min(s.dialogIdx,L3_BLOO_INTRO.length-1)]
-            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.dialogIdx>=L3_BLOO_INTRO.length-1)
-          }else if(!s.marketOpen){
-            let nearNpcForPrompt=-1,nDist=Infinity
-            for(let i=0;i<s.npcs.length;i++){
-              const d=Math.hypot(s.px-s.npcs[i].x,s.py-s.npcs[i].y)
-              if(d<TS*2.5&&d<nDist){nDist=d;nearNpcForPrompt=i}
-            }
-            if(nearNpcForPrompt>=0&&s.gameStage>=L3_EARN){
-              const npc=s.npcs[nearNpcForPrompt]
-              let msg:string,color:string
-              if(npc.isMarket){msg="[Z] Open Market Shop";color="#065f46"}
-              else if(npc.tradesDone>=L3_NPC_MAX_TRADES){msg=`Full — restocks in ${Math.ceil(npc.tradeTimer/60)}s`;color="#dc2626"}
-              else if(s.inventory.berries<L3_NPC_BERRIES_COST){msg=`[Z] Sell berries (need ${L3_NPC_BERRIES_COST}, you have ${s.inventory.berries})`;color="#dc2626"}
-              else{msg=`[Z] Sell ${L3_NPC_BERRIES_COST} berries → 1 coin`;color="#1e40af"}
-              drawPrompt(ctx,cw,ch,msg,color)
-            }else if(nearFoliageNode){
-              const fn=nearFoliageNode
-              const cdLeft=s.harvestCooldown>0?`  (${(s.harvestCooldown/60).toFixed(1)}s)`:""
-              drawPrompt(ctx,cw,ch,`[Z] Harvest ${fn.type==="tree"?"Tree":"Bush"} (+${HARVEST_BERRIES} berries)${cdLeft}`,s.harvestCooldown>0?"#94a3b8":"#1e40af")
-            }
+        }else if(variant==="lessonFarm"){
+          const farmBlooDist=Math.hypot(s.px-s.bloo.x,s.py-s.bloo.y)
+          const farmNearBloo=farmBlooDist<TS*2.5
+          const farmNearBink=Math.hypot(s.px-FARM_BINK_X,s.py-FARM_BINK_Y)<FARM_INTERACT
+          const plant=s.farmState.assignedPlant?PLANT_REGISTRY[s.farmState.assignedPlant]:null
+          if(farmNearBloo&&s.gameStage===FARM_TALK_BLOO){
+            const line=FARM_BLOO_INTRO[Math.min(s.dialogIdx,FARM_BLOO_INTRO.length-1)]
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.dialogIdx>=FARM_BLOO_INTRO.length-1)
+          }else if(farmNearBink&&s.gameStage===FARM_FIND_BINK){
+            const line=FARM_BINK_INTRO[Math.min(s.binkDialogIdx,FARM_BINK_INTRO.length-1)]
+            drawDialogBox(ctx,cw,ch,"Bink","#a855f7",line,s.binkDialogIdx>=FARM_BINK_INTRO.length-1)
+          }else if(s.gameStage===FARM_CHOICE){
+            drawChoiceDialogBox(ctx,cw,ch,"Bink","#a855f7","What will you do next?",PHASE_1_CONTENT.choices,s.farmChoiceIdx)
+          }else if(s.gameStage===FARM_TASK_LOAN){
+            if(Math.hypot(s.px-ENTRANCES[2].wx,s.py-ENTRANCES[2].wy)<TS*2)drawPrompt(ctx,cw,ch,FARM_LOAN_LINE,"#1e40af")
+            else drawPrompt(ctx,cw,ch,"Head to the Savings Bank (west side of town)","#64748b")
+          }else if(s.gameStage===FARM_TASK_MACHINE){
+            if(farmNearBink)drawPrompt(ctx,cw,ch,FARM_MACHINE_LINE,"#c2410c")
+            else drawPrompt(ctx,cw,ch,"Walk back to Bink's machine","#64748b")
+          }else if(s.gameStage===FARM_TASK_DIG){
+            drawPrompt(ctx,cw,ch,FARM_DIG_LINE,"#4a3118")
+          }else if(s.gameStage===FARM_TRAP_OUTCOME){
+            const lines=farmTrapLines(s.farmState)
+            const line=lines[Math.min(s.dialogIdx,lines.length-1)]
+            drawDialogBox(ctx,cw,ch,"Bink","#a855f7",line,s.dialogIdx>=lines.length-1)
+          }else if(s.gameStage===FARM_PLANT_REVEAL){
+            const lines=plant?plantRevealLines(plant):["Let's get that plot growing!"]
+            const line=lines[Math.min(s.farmRevealIdx,lines.length-1)]
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.farmRevealIdx>=lines.length-1)
           }
-          if(s.marketOpen)drawMarketMenu(ctx,cw,ch,s.inventory.coins)
         }
 
         // ── Shared overlays ───────────────────────────────────────────────
         if(s.notifTimer>0)drawNotifBanner(ctx,cw,ch,s.notifText,Math.min(1,s.notifTimer/40))
-        if(variant==="lesson3"&&s.gameStage===L3_COMPLETE&&!s.breadDismissed)drawLessonCompleteL3(ctx,cw,ch)
         if(s.dayOver)drawDayOver(ctx,cw,ch,s.deathDropped,s.deathLost)
 
         s.raf=requestAnimationFrame(loop)
@@ -2239,6 +2239,11 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
       cancelAnimationFrame(stateRef.current.raf)
       window.removeEventListener("keydown",onDown)
       window.removeEventListener("keyup",onUp)
+      canvas.removeEventListener("pointerdown",onPointerDown)
+      canvas.removeEventListener("pointermove",onPointerMove)
+      window.removeEventListener("pointerup",onPointerUp)
+      window.removeEventListener("pointercancel",onPointerUp)
+      canvas.removeEventListener("contextmenu",onContextMenu)
       ro.disconnect()
     }
   },[])// eslint-disable-line react-hooks/exhaustive-deps
@@ -2287,7 +2292,10 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
         ref={canvasRef}
         tabIndex={0}
         className="w-full h-full outline-none block"
-        style={{imageRendering:"auto"}}
+        style={{
+          imageRendering:"auto",touchAction:"none",
+          WebkitUserSelect:"none",userSelect:"none",WebkitTouchCallout:"none",
+        }}
       />
       {showOverlay&&(
         <div

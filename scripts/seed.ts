@@ -62,16 +62,20 @@ const main = async () => {
         // ── Lessons ───────────────────────────────────────────────────────────
         await db.insert(schema.lessons).values([
 
-            // ── Unit 1: Income (9 lessons — custom game pages, no challenges) ───
-            { id:  1, unitId: 1, order: 1, title: "A Day on the Island" },        // → /map (game)
-            { id:  2, unitId: 1, order: 2, title: "Gross & Net Income" },         // → gross-net-income
-            { id:  3, unitId: 1, order: 3, title: "The Shopkeeper's Surprise" },  // → sales-tax-game
-            { id:  4, unitId: 1, order: 4, title: "Sales Tax Explained" },          // → sales-tax
-            { id:  5, unitId: 1, order: 5, title: "Tax Brackets Island" },          // → map-tax (island game)
-            { id:  6, unitId: 1, order: 6, title: "Tax Brackets Explained" },       // → tax-brackets
-            { id:  7, unitId: 1, order: 7, title: "Spending Your Paycheck" },     // → disposable-discretionary
-            { id:  8, unitId: 1, order: 8, title: "Blank" },
-            { id:  9, unitId: 1, order: 9, title: "Blank" },
+            // ── Unit 1: Income (8 lessons — custom game pages, no challenges) ───
+            // Lessons 1 & 2 are static/identical for everyone. Lessons 3-8 are
+            // three odd(gameplay)/even(review) pairs — 3&4, 5&6, 7&8 — whose
+            // actual content is a dynamic CYOA stream (farm/fish/rumors)
+            // resolved per-player at request time via lib/income-progression.ts,
+            // not by this row's title.
+            { id:  1, unitId: 1, order: 1, title: "A Day on the Island" },      // → /map (game)
+            { id:  2, unitId: 1, order: 2, title: "Gross & Net Income" },       // → gross-net-income
+            { id:  3, unitId: 1, order: 3, title: "Choose Your Adventure" },    // → dynamic stream choice (gameplay)
+            { id:  4, unitId: 1, order: 4, title: "Financial Concept Review" }, // → dynamic stream review
+            { id:  5, unitId: 1, order: 5, title: "Choose Your Adventure" },    // → dynamic stream choice (2 left)
+            { id:  6, unitId: 1, order: 6, title: "Financial Concept Review" },
+            { id:  7, unitId: 1, order: 7, title: "Your Final Adventure" },     // → last remaining stream, auto-assigned
+            { id:  8, unitId: 1, order: 8, title: "Financial Concept Review" },
 
             // ── Unit 2: Budget (9 lessons) ────────────────────────────────────
             { id: 10, unitId: 2, order: 1, title: "What is a Budget?" },

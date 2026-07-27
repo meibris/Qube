@@ -6,14 +6,15 @@ type Props = {
   children:React.ReactNode
 }
 
+// SEO: this description is what shows as the grey snippet under "Qube Finance" in Google search results.
 export const metadata: Metadata = {
   title: "Qube Finance | Learn Financial Literacy Through Games",
   description:
-    "Qube Finance is a gamified financial literacy platform that teaches teens and young adults budgeting, taxes, investing, and loans through interactive lessons and games.",
+    "Qube Finance is a gamified app that teaches teens and young adults budgeting, taxes, investing, and loans through fun, interactive lessons and games.",
   openGraph: {
     title: "Qube Finance",
     description:
-      "Learn budgeting, taxes, investing, and loans through interactive lessons and games.",
+      "Learn budgeting, taxes, investing, and loans through fun, interactive lessons and games.",
     url: "https://www.playqube.org",
     siteName: "Qube Finance",
     images: ["/QubeSymbolTemp.svg"],
@@ -23,7 +24,7 @@ export const metadata: Metadata = {
     card: "summary",
     title: "Qube Finance",
     description:
-      "Learn budgeting, taxes, investing, and loans through interactive lessons and games.",
+      "Learn budgeting, taxes, investing, and loans through fun, interactive lessons and games.",
     images: ["/QubeSymbolTemp.svg"],
   },
 }
@@ -35,7 +36,7 @@ const jsonLd = {
   alternateName: "Qube",
   url: "https://www.playqube.org",
   description:
-    "Qube Finance is a gamified financial literacy platform that teaches budgeting, taxes, investing, and loans through interactive lessons and games.",
+    "Qube Finance is a gamified app that teaches teens and young adults budgeting, taxes, investing, and loans through fun, interactive lessons and games.",
 }
 
 const MarketingLayout = ({ children }: Props) => {

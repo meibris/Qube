@@ -1,51 +1,61 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { GameMap } from "../map/game-map"
 import { StoryScroll, type StoryScrollData } from "@/components/story-scroll"
 
-// Each choice.id will eventually route to a different story branch for the
-// rest of the Income unit. None of these three have distinct gameplay built
-// yet — they all fall back to the same map until their branches are built.
-const LESSON3_SCROLL: StoryScrollData = {
+// Routes for each stream — farm and fish have real destinations now
+// (/map-3/farm, /map-3/fish); rumors isn't built yet, so it falls back to
+// staying on this same paused-then-unpaused island map for now.
+const STREAM_ROUTES: Record<string, string> = {
+  farm: "/map-3/farm",
+  fish: "/map-3/fish",
+}
+
+const ADVENTURE_SCROLL: StoryScrollData = {
   title: "The Island's Bounty",
   body: "Bloo, the bright blue qube, has taught you the basics of berry-picking. To decide how you'll spend your day on the island, do you...",
   choices: [
-    { id: "farm", icon: "🪓", text: "Ask about starting a sustainable farm." },
+    { id: "farm", icon: "🪓", text: "Ask about starting a farm." },
     { id: "fish", icon: "🎣", text: "Explore the coast for fish." },
     { id: "rumors", icon: "📜", text: "Listen to local rumors first." },
   ],
 }
 
-export function MapL3Client({
+export function Map3Client({
   initialCoins,
   playerColor,
 }: {
   initialCoins: number
   playerColor: string
 }) {
+  const router = useRouter()
   const [storyChoice, setStoryChoice] = useState<string | null>(null)
+
+  function handleChoose(id: string) {
+    try {
+      localStorage.setItem("incomeStreamChoice", id)
+    } catch {}
+    const route = STREAM_ROUTES[id]
+    if (route) {
+      router.push(route)
+      return
+    }
+    // No dedicated route yet (e.g. rumors) — stay here and just unpause.
+    setStoryChoice(id)
+  }
 
   return (
     <div className="relative w-full h-full">
       <GameMap
-        variant="lesson3"
+        variant="lessonFarm"
         initialCoins={initialCoins}
         playerColor={playerColor}
         paused={!storyChoice}
       />
-      {!storyChoice && (
-        <StoryScroll
-          data={LESSON3_SCROLL}
-          onChoose={(id) => {
-            try {
-              localStorage.setItem("lesson3StoryChoice", id)
-            } catch {}
-            setStoryChoice(id)
-          }}
-        />
-      )}
+      {!storyChoice && <StoryScroll data={ADVENTURE_SCROLL} onChoose={handleChoose} />}
       {storyChoice && (
         <Link
           href="/learn"

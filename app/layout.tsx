@@ -24,7 +24,7 @@ export const metadata: Metadata = {
     template: "%s | Qube Finance",
   },
   description:
-    "Qube Finance is a gamified financial literacy platform that teaches budgeting, taxes, investing, and loans through interactive lessons and games.",
+    "Qube Finance is a gamified app that teaches teens and young adults budgeting, taxes, investing, and loans through fun, interactive lessons and games.",
 };
 
 export default function RootLayout({

@@ -34,7 +34,7 @@ export default function Home() {
             <SignedOut>
               <SignUpButton
                 mode="modal"
-                forceRedirectUrl="/classroom"
+                forceRedirectUrl="/learn"
               >
                 <Button size="lg" variant="secondary" className="w-full">
                   Get Started
@@ -42,7 +42,7 @@ export default function Home() {
               </SignUpButton>
               <SignInButton
                 mode="modal"
-                forceRedirectUrl="/classroom"
+                forceRedirectUrl="/learn"
               >
                 <Button size="lg" variant="primaryOutline" className="w-full">
                   Already have an account
@@ -51,7 +51,7 @@ export default function Home() {
             </SignedOut>
             <SignedIn>
               <Button size="lg" variant="secondary" className="w-full" asChild>
-                <Link href="/classroom">
+                <Link href="/learn">
                   Continue Learning
                 </Link>
               </Button>

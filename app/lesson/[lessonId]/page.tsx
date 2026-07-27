@@ -40,9 +40,8 @@ const LessonIdPage = async ({
 
             const INCOME_ROUTES: Record<number, string> = {
                 2: `/lesson/gross-net-income`,
-                3: `/map-l3`,
+                3: `/map-3`,
                 4: "/lesson/job-minigame",
-                5: `/map-tax`,
                 6: `/lesson/tax-brackets`,
                 7: "/lesson/disposable-discretionary",
                 8: `/lesson/blank-lesson?key=incomeSourcesCompleted`,
