@@ -9,8 +9,9 @@ import {
   FOLIAGE_REGEN, FOLIAGE_RANGE,
   TREE_HIT_R, BUSH_HIT_R, TREE_HIT_OY, BUSH_HIT_OY,
   NPC_HALF, NPC_SPEED,
-  type ImgMap, type Inventory, freshInventory,
-  sustenanceSpeedMult, drawInventoryPanel,
+  type ImgMap, type Inventory, freshInventory, claimInventorySlot,
+  sustenanceSpeedMult, drawInventoryPanel, inventoryPanelHeight,
+  inventorySlotIndexAt, swapInventorySlots, inventoryItemCount, type InventoryDrag,
   drawSharedPlayer,
 } from "@/lib/game-shared"
 
@@ -43,9 +44,9 @@ type TileID=0|1|2|3|4|5|6|7|8
 
 // ─── House definitions ────────────────────────────────────────────────────────
 // Reuse existing buildings:
-//   house 0 → Savings Bank (orange, left island)  — shared shack, cheap, 0 storage
-//   house 1 → Budget HQ   (purple, center island) — Cozy Cottage, private, expensive
-//   house 2 → Tax Office  (red, right island)     — shared apartment, medium, 2 storage
+//   house 0 → Savings Bank (orange, left island), shared shack, cheap, 0 storage
+//   house 1 → Budget HQ   (purple, center island), Cozy Cottage, private, expensive
+//   house 2 → Tax Office  (red, right island),     shared apartment, medium, 2 storage
 interface HouseDef{
   name:string;desc:string
   downPayment:number;dailyRate:number;storageSlots:number
@@ -124,7 +125,7 @@ function isLand(r:number,c:number):boolean{
   return false
 }
 
-// ─── Building definitions (original 5 only — no extra house tiles) ────────────
+// ─── Building definitions (original 5 only, no extra house tiles) ────────────
 interface BuildingDef{tile:TileID;r1:number;r2:number;c1:number;c2:number;color:string;border:string;label:string[];svg:string}
 const BUILDING_DEFS:BuildingDef[]=[
   {tile:B_INCOME, r1:20,r2:24,c1:27,c2:32,color:"#3b82f6",border:"#1d4ed8",label:["Income","Center"],svg:"house"},
@@ -246,6 +247,9 @@ async function loadImages():Promise<ImgMap>{
   return Promise.all([
     ...pngNames.map(n=>new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs[n]=img;res()};img.onerror=()=>res();img.src=`/${n}.png`})),
     ...woodSvgNames.map(n=>new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs[n]=img;res()};img.onerror=()=>res();img.src=`/woodbuildings/${n}.svg`})),
+    new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["berry"]=img;res()};img.onerror=()=>res();img.src="/strawberry.svg"}),
+    new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["apple"]=img;res()};img.onerror=()=>res();img.src="/apple.svg"}),
+    new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["coin"]=img;res()};img.onerror=()=>res();img.src="/coin.svg"}),
     new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["treeApples"]=img;res()};img.onerror=()=>res();img.src="/treeApples.png"}),
     new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["treeNoApples"]=img;res()};img.onerror=()=>res();img.src="/treeNoApples.png"}),
     new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["bushBerry"]=img;res()};img.onerror=()=>res();img.src="/BushBerry.png"}),
@@ -384,7 +388,7 @@ function blooOnLand(wx:number,wy:number):boolean{
   return !isBlocking(wx+R,wy+R)&&!isBlocking(wx-R,wy+R)&&!isBlocking(wx+R,wy-R)&&!isBlocking(wx-R,wy-R)
 }
 
-// A* on the tile grid — returns world-space waypoints Bloo should walk through
+// A* on the tile grid, returns world-space waypoints Bloo should walk through
 function findPath(sx:number,sy:number,gx:number,gy:number):{x:number;y:number}[]{
   const sc=Math.floor(sx/TS),sr=Math.floor(sy/TS)
   const gc=Math.floor(gx/TS),gr=Math.floor(gy/TS)
@@ -441,10 +445,10 @@ function updateBloo(bloo:BlooState,stage:number,px:number,py:number){
         const spd=Math.min(2.0,wdist)
         const nx=bloo.x+wdx/wdist*spd,ny=bloo.y+wdy/wdist*spd
         if(blooOnLand(nx,ny)){bloo.x=nx;bloo.y=ny}
-        else{bloo.path=[]}  // path invalidated — recompute next frame
+        else{bloo.path=[]}  // path invalidated, recompute next frame
       }
     }else{
-      // No path — try angled fallback directions
+      // No path, try angled fallback directions
       const dx=px-bloo.x,dy=py-bloo.y
       const angle=Math.atan2(dy,dx),spd=Math.min(2.0,dist)
       for(const off of[0,0.5,-0.5,1.0,-1.0,1.5,-1.5]){
@@ -642,6 +646,9 @@ export function GameMapBudget({initialCoins}:Props){
     notifTimer:0 as number,
     harvestCooldown:0 as number,
     completionCalled:false as boolean,
+    inventoryPanelRect:null as {x:number,y:number}|null,
+    invDragFromIndex:null as number|null,
+    invDragPointerX:0 as number,invDragPointerY:0 as number,
   })
 
   useEffect(()=>{
@@ -671,6 +678,49 @@ export function GameMapBudget({initialCoins}:Props){
     const onUp=(e:KeyboardEvent)=>stateRef.current.keys.delete(e.key)
     window.addEventListener("keydown",onDown)
     window.addEventListener("keyup",onUp)
+
+    // Drag-and-drop inventory reordering.
+    let activePointerId:number|null=null
+    const onPointerDown=(e:PointerEvent)=>{
+      if(e.button!==undefined&&e.button!==0)return
+      const rect=canvas.getBoundingClientRect()
+      const sx=e.clientX-rect.left, sy=e.clientY-rect.top
+      const ip=stateRef.current.inventoryPanelRect
+      if(!ip)return
+      const idx=inventorySlotIndexAt(sx,sy,ip.x,ip.y)
+      const slotType=idx>=0?stateRef.current.inventory.slots[idx]:null
+      if(idx<0||!slotType||inventoryItemCount(stateRef.current.inventory,slotType)<=0)return
+      e.preventDefault()
+      try{canvas.setPointerCapture(e.pointerId)}catch{}
+      activePointerId=e.pointerId
+      stateRef.current.invDragFromIndex=idx
+      stateRef.current.invDragPointerX=sx
+      stateRef.current.invDragPointerY=sy
+    }
+    const onPointerMove=(e:PointerEvent)=>{
+      if(stateRef.current.invDragFromIndex===null)return
+      if(activePointerId!==null&&e.pointerId!==activePointerId)return
+      e.preventDefault()
+      const rect=canvas.getBoundingClientRect()
+      stateRef.current.invDragPointerX=e.clientX-rect.left
+      stateRef.current.invDragPointerY=e.clientY-rect.top
+    }
+    const onPointerUp=(e:PointerEvent)=>{
+      if(activePointerId!==null&&e.pointerId!==activePointerId)return
+      activePointerId=null
+      if(stateRef.current.invDragFromIndex===null)return
+      const from=stateRef.current.invDragFromIndex
+      const ip=stateRef.current.inventoryPanelRect
+      const rect=canvas.getBoundingClientRect()
+      const sx=e.clientX-rect.left, sy=e.clientY-rect.top
+      const to=ip?inventorySlotIndexAt(sx,sy,ip.x,ip.y):-1
+      if(to>=0&&to!==from)swapInventorySlots(stateRef.current.inventory,from,to)
+      stateRef.current.invDragFromIndex=null
+    }
+    canvas.addEventListener("pointerdown",onPointerDown)
+    canvas.addEventListener("pointermove",onPointerMove,{passive:false})
+    window.addEventListener("pointerup",onPointerUp)
+    window.addEventListener("pointercancel",onPointerUp)
 
     ctx.fillStyle="#1a3a2a";ctx.fillRect(0,0,canvas.offsetWidth,canvas.offsetHeight)
     ctx.fillStyle="white";ctx.font="bold 18px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
@@ -785,18 +835,21 @@ export function GameMapBudget({initialCoins}:Props){
           }
         }
 
-        // ── [Z] near foliage → harvest berries into inventory ────────────
+        // ── [Z] near foliage → harvest into inventory (bush → berries, tree → apples)
         if(eDown&&!eUsed&&nearFoliageIdx>=0&&s.harvestCooldown===0&&isActivePlaying&&s.houseMenuOpen<0){
-          s.inventory.berries+=HARVEST_BERRIES
-          s.foliage[nearFoliageIdx].hasFruit=false
-          s.foliage[nearFoliageIdx].regenTimer=FOLIAGE_REGEN
+          const harvestedNode=s.foliage[nearFoliageIdx]
+          if(harvestedNode.type==="tree"){s.inventory.apples+=HARVEST_BERRIES;claimInventorySlot(s.inventory,"apple")}
+          else{s.inventory.berries+=HARVEST_BERRIES;claimInventorySlot(s.inventory,"berry")}
+          harvestedNode.hasFruit=false
+          harvestedNode.regenTimer=FOLIAGE_REGEN
           s.harvestCooldown=HARVEST_COOLDOWN
           consumeE()
         }
 
-        // ── [X] eat berry from inventory ──────────────────────────────────
-        if((keys.has("x")||keys.has("X"))&&s.houseMenuOpen<0&&s.inventory.berries>0&&isActivePlaying){
-          s.inventory.berries--
+        // ── [X] eat berry/apple from inventory ─────────────────────────────
+        if((keys.has("x")||keys.has("X"))&&s.houseMenuOpen<0&&(s.inventory.berries>0||s.inventory.apples>0)&&isActivePlaying){
+          if(s.inventory.berries>0)s.inventory.berries--
+          else s.inventory.apples--
           s.sustenance=Math.min(SUSTENANCE_MAX,s.sustenance+BERRY_SUSTENANCE)
           keys.delete("x");keys.delete("X")
         }
@@ -863,7 +916,16 @@ export function GameMapBudget({initialCoins}:Props){
         drawFoliage(ctx,fFront,camX,camY,cw,ch,imgs)
         drawBuildings(ctx,camX,camY,cw,ch,imgs)
         drawMinimap(ctx,s.px,s.py,cw)
-        if(imgs) drawInventoryPanel(ctx,s.inventory,8,90,imgs)
+        if(imgs){
+          const invY=Math.round(ch/2-inventoryPanelHeight()/2)
+          s.inventoryPanelRect={x:8,y:invY}
+          const invDrag:InventoryDrag|null=s.invDragFromIndex!==null?{
+            fromIndex:s.invDragFromIndex,
+            overIndex:inventorySlotIndexAt(s.invDragPointerX,s.invDragPointerY,8,invY),
+            pointerX:s.invDragPointerX,pointerY:s.invDragPointerY,
+          }:null
+          drawInventoryPanel(ctx,s.inventory,8,invY,imgs,invDrag)
+        }
 
         // ── Compute display values for HTML overlay ────────────────────────
         const showDialog=nearBloo&&(s.gameStage===STAGE_MORNING||s.gameStage===STAGE_CONFIRM)
@@ -911,7 +973,7 @@ export function GameMapBudget({initialCoins}:Props){
           nightAlpha:s.nightAlpha,
           showTimecard:s.gameStage===STAGE_TIMECARD_1||s.gameStage===STAGE_TIMECARD_2,
           timecardTitle:s.gameStage===STAGE_TIMECARD_1?"🌙  Night Falls":"☀️  Morning",
-          timecardSubtitle:s.gameStage===STAGE_TIMECARD_1?"The island grows quiet...":"You survived — barely.",
+          timecardSubtitle:s.gameStage===STAGE_TIMECARD_1?"The island grows quiet...":"You survived, barely.",
           timecardAlpha,
           showSleepWarning:s.gameStage===STAGE_SLEEP_DRAIN,
           taskText:s.gameStage!==STAGE_TIMECARD_1&&s.gameStage!==STAGE_TIMECARD_2
@@ -933,6 +995,10 @@ export function GameMapBudget({initialCoins}:Props){
       cancelAnimationFrame(stateRef.current.raf)
       window.removeEventListener("keydown",onDown)
       window.removeEventListener("keyup",onUp)
+      canvas.removeEventListener("pointerdown",onPointerDown)
+      canvas.removeEventListener("pointermove",onPointerMove)
+      window.removeEventListener("pointerup",onPointerUp)
+      window.removeEventListener("pointercancel",onPointerUp)
       ro.disconnect()
     }
   },[])
@@ -965,7 +1031,7 @@ export function GameMapBudget({initialCoins}:Props){
             </>
           )}
           <p className="text-gray-400 text-sm max-w-xs">
-            Housing is a fixed cost — it comes out of your budget every single day. Always plan for it first!
+            Housing is a fixed cost. It comes out of your budget every single day. Always plan for it first!
           </p>
           <button
             onClick={()=>router.push("/learn")}
@@ -984,7 +1050,7 @@ export function GameMapBudget({initialCoins}:Props){
 
   return(
     <div className="relative w-full h-full">
-      {/* Canvas — world rendering only */}
+      {/* Canvas: world rendering only */}
       <canvas
         ref={canvasRef}
         tabIndex={0}
@@ -1000,7 +1066,7 @@ export function GameMapBudget({initialCoins}:Props){
         />
       )}
 
-      {/* Time card — full screen cinematic */}
+      {/* Time card: full screen cinematic */}
       {display.showTimecard&&(
         <div
           className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"
@@ -1013,7 +1079,7 @@ export function GameMapBudget({initialCoins}:Props){
         </div>
       )}
 
-      {/* House name labels — positions updated directly by game loop via ref (no React lag) */}
+      {/* House name labels: positions updated directly by game loop via ref (no React lag) */}
       <div ref={labelsContainerRef} className="absolute inset-0 pointer-events-none overflow-hidden" style={{display:"none"}}>
         {HOUSE_DEFS.map((h,i)=>(
           <div key={i} className="absolute" style={{transform:"translateX(-50%)"}}>
@@ -1027,7 +1093,7 @@ export function GameMapBudget({initialCoins}:Props){
         ))}
       </div>
 
-      {/* UI layer — always above night */}
+      {/* UI layer: always above night */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
 
         {/* ── Budget top bar: 3 tabs ────────────────────────────────────── */}
@@ -1046,7 +1112,10 @@ export function GameMapBudget({initialCoins}:Props){
           {/* Coins */}
           <div className="bg-white rounded-2xl shadow-xl border-2 border-b-4 border-slate-200 w-48 px-3 pt-2 pb-2.5">
             <div className="text-[11px] font-bold uppercase tracking-wide text-blue-800">Coins</div>
-            <div className="text-xl font-bold text-amber-500 mt-1">🪙 {display.coins}</div>
+            <div className="text-xl font-bold text-amber-500 mt-1 flex items-center gap-1">
+              <img src="/coin.svg" alt="" className="w-5 h-5" />
+              {display.coins}
+            </div>
             <div className="text-[11px] text-slate-400">your savings</div>
           </div>
           {/* Housing */}
@@ -1063,12 +1132,12 @@ export function GameMapBudget({initialCoins}:Props){
                 <div className="text-[11px] text-slate-400">Visit each house</div>
               </>
             ):(
-              <div className="text-sm text-slate-300 mt-1">—</div>
+              <div className="text-sm text-slate-300 mt-1">-</div>
             )}
           </div>
         </div>
 
-        {/* ── Task sign — top left ──────────────────────────────────────── */}
+        {/* ── Task sign, top left ──────────────────────────────────────── */}
         {display.taskText&&(
           <div className="absolute top-2 left-2 bg-white rounded-2xl shadow-xl border-2 border-b-4 border-slate-200 px-3 pt-2 pb-2.5 max-w-[220px]">
             <div className="text-[11px] font-bold uppercase tracking-wide text-blue-800">Task</div>

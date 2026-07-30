@@ -14,14 +14,14 @@ export const quests = [
     title: "Collect 70 Berries",
     value: 70,
     type: "berries" as const,
-    icon: "/Berry.png",
+    icon: "/strawberry.svg",
     emoji: null as string | null,
   },
   {
     title: "Collect 30 Coins",
     value: 30,
     type: "coins" as const,
-    icon: null as string | null,
-    emoji: "🪙",
+    icon: "/coin.svg",
+    emoji: null as string | null,
   },
 ]

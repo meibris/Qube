@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { saveGameLesson, getInitialCoins } from "@/actions/game-lesson"
+import { CoinIcon } from "@/components/coin-icon"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -78,6 +79,25 @@ function dist(ax: number, ay: number, bx: number, by: number) {
     return Math.sqrt((ax - bx) ** 2 + (ay - by) ** 2)
 }
 function ri(n: number) { return Math.round(n) }
+
+// Loaded once at module scope; plain canvas draw functions below aren't
+// hooks, so this mirrors the same singleton-image pattern the map games use.
+let coinImg: HTMLImageElement | null = null
+if (typeof window !== "undefined") {
+    coinImg = new Image()
+    coinImg.src = "/coin.svg"
+}
+function drawCoinPrice(ctx: CanvasRenderingContext2D, price: number, cx: number, cy: number, size = 9, color = "#7a4a10") {
+    if (coinImg?.complete && coinImg.naturalWidth > 0) {
+        ctx.font = `bold ${size}px monospace`; ctx.textAlign = "left"
+        const label = `${price}`, labelW = ctx.measureText(label).width, iconSz = size
+        const totalW = iconSz + 3 + labelW, startX = ri(cx - totalW / 2)
+        ctx.drawImage(coinImg, startX, ri(cy - iconSz / 2), iconSz, iconSz)
+        ctx.fillStyle = color; ctx.fillText(label, startX + iconSz + 3, ri(cy))
+    } else {
+        txt(ctx, `🪙 ${price}`, cx, cy + size / 2, size, color)
+    }
+}
 
 // ─── Canvas drawing ───────────────────────────────────────────────────────────
 
@@ -240,7 +260,7 @@ function drawStore(
         ctx.font = "26px serif"; ctx.textAlign = "center"; ctx.fillText(item.emoji, ri(item.sx), ri(item.sy))
         fr(ctx, item.sx - 22, item.sy + 4, 44, 16, "#fff9e6")
         ctx.strokeStyle = "#c8a020"; ctx.lineWidth = 1; ctx.strokeRect(item.sx - 22, item.sy + 4, 44, 16)
-        txt(ctx, `🪙 ${item.price}`, item.sx, item.sy + 15, 9, "#7a4a10")
+        drawCoinPrice(ctx, item.price, item.sx, item.sy + 15, 9, "#7a4a10")
     }
 
     // Checkout counter
@@ -284,7 +304,7 @@ function drawSpacePrompt(ctx: CanvasRenderingContext2D, x: number, y: number) {
 export function SpendingGame() {
     const canvasRef = useRef<HTMLCanvasElement>(null)
 
-    // React state — drives re-renders for UI overlays only
+    // React state. Drives re-renders for UI overlays only
     const [scene, setScene]             = useState<Scene>("VILLAGE")
     const [coins, setCoins]             = useState(0)
     const [coinsReady, setCoinsReady]   = useState(false)
@@ -482,7 +502,7 @@ export function SpendingGame() {
 
     return (
         <div className="fixed inset-0 bg-gray-900 flex items-center justify-center">
-            {/* Loading overlay — shown until coins are fetched */}
+            {/* Loading overlay. Shown until coins are fetched */}
             {!coinsReady && (
                 <div className="absolute inset-0 z-30 bg-gray-900 flex items-center justify-center">
                     <span className="text-white text-lg font-bold animate-pulse">Loading…</span>
@@ -491,7 +511,7 @@ export function SpendingGame() {
 
             {/* Coin counter */}
             <div className="absolute top-4 right-5 z-20 bg-white/90 backdrop-blur rounded-2xl px-4 py-2 shadow-lg flex items-center gap-2">
-                <span className="text-xl">🪙</span>
+                <span className="text-xl"><CoinIcon /></span>
                 <span className="font-black text-lg text-gray-800">{coins.toLocaleString()}</span>
             </div>
 
@@ -539,10 +559,10 @@ function DialogueOverlay({ dialogue }: { dialogue: Dialogue }) {
                     <div className="absolute -bottom-[10px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[8px] border-r-[8px] border-t-[14px] border-l-transparent border-r-transparent border-t-white" />
                     <div className="text-5xl mb-2">{item.emoji}</div>
                     <div className="font-black text-xl text-gray-800 mb-1">{item.name}</div>
-                    <div className="text-2xl font-black text-yellow-600 mb-5">🪙 {item.price}</div>
+                    <div className="text-2xl font-black text-yellow-600 mb-5">{item.price} <CoinIcon /></div>
                     <div className="flex gap-3 justify-center">
-                        <span className="px-4 py-2 bg-green-500 text-white font-black rounded-xl text-sm border-b-4 border-green-700">Z — Pick up</span>
-                        <span className="px-4 py-2 bg-gray-200 text-gray-700 font-black rounded-xl text-sm border-b-4 border-gray-400">X — Pass</span>
+                        <span className="px-4 py-2 bg-green-500 text-white font-black rounded-xl text-sm border-b-4 border-green-700">Z. Pick up</span>
+                        <span className="px-4 py-2 bg-gray-200 text-gray-700 font-black rounded-xl text-sm border-b-4 border-gray-400">X. Pass</span>
                     </div>
                 </div>
             </div>
@@ -558,7 +578,7 @@ function DialogueOverlay({ dialogue }: { dialogue: Dialogue }) {
                         Sorry, you don&apos;t have enough funds for the <strong>{dialogue.item.name}</strong>.
                     </p>
                     <div className="mt-4 text-center">
-                        <span className="px-4 py-2 bg-gray-200 text-gray-700 font-black rounded-xl text-sm border-b-4 border-gray-400">SPACE / Z / X — OK</span>
+                        <span className="px-4 py-2 bg-gray-200 text-gray-700 font-black rounded-xl text-sm border-b-4 border-gray-400">SPACE / Z / X. OK</span>
                     </div>
                 </div>
             </div>
@@ -577,19 +597,19 @@ function DialogueOverlay({ dialogue }: { dialogue: Dialogue }) {
                     <div className="bg-gray-50 rounded-2xl p-4 mb-4 font-mono text-sm space-y-1.5">
                         <div className="flex justify-between">
                             <span className="text-gray-600">{item.emoji} {item.name}</span>
-                            <span className="font-bold">🪙 {item.price.toFixed(2)}</span>
+                            <span className="font-bold">{item.price.toFixed(2)} <CoinIcon /></span>
                         </div>
                         <div className="flex justify-between text-gray-400 text-xs">
                             <span>Sales tax (8%)</span>
-                            <span>🪙 {tax.toFixed(2)}</span>
+                            <span>{tax.toFixed(2)} <CoinIcon /></span>
                         </div>
                         <div className="border-t border-gray-200 pt-1.5 flex justify-between font-black">
                             <span>Total</span>
-                            <span className="text-green-600">🪙 {total.toFixed(2)}</span>
+                            <span className="text-green-600">{total.toFixed(2)} <CoinIcon /></span>
                         </div>
                     </div>
                     <div className="text-center">
-                        <span className="px-4 py-2 bg-green-500 text-white font-black rounded-xl text-sm border-b-4 border-green-700">SPACE / Z — Buy it!</span>
+                        <span className="px-4 py-2 bg-green-500 text-white font-black rounded-xl text-sm border-b-4 border-green-700">SPACE / Z. Buy it!</span>
                     </div>
                 </div>
             </div>
@@ -615,7 +635,7 @@ function ShoppingComplete({ item, xp }: { item: StoreItem; xp: number }) {
                 <div className="text-5xl">{item.emoji}</div>
                 <div className="font-black text-lg text-gray-800">{item.name}</div>
                 <div className="text-yellow-600 font-bold text-sm">
-                    🪙 {(item.price * (1 + SALES_TAX)).toFixed(2)} spent (incl. tax)
+                    {(item.price * (1 + SALES_TAX)).toFixed(2)} <CoinIcon /> spent (incl. tax)
                 </div>
             </div>
 

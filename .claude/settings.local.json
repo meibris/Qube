@@ -37,7 +37,11 @@
       "Bash(npx tsc *)",
       "Bash(grep -E \"\\\\.\\(png|jpg|jpeg\\)$\")",
       "Bash(python3 -c ' *)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Read(//c/Users/mbrisbois/AppData/Local/Programs/Microsoft VS Code/resources/app/extensions/configuration-editing/**)",
+      "Read(//c/Users/mbrisbois/AppData/Local/Programs/Microsoft VS Code/resources/**)",
+      "Bash(git stash *)",
+      "Bash(git add *)"
     ]
   }
 }

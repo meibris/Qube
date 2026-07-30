@@ -168,7 +168,7 @@ body,
  * All colors below are CSS custom properties with a pastel-tan fallback so
  * unthemed scrolls look exactly as before. Pass a `theme` prop to
  * <StoryScroll> to override --scroll-* on the wrapper (see SCROLL_THEME_VARS
- * in components/story-scroll.tsx) and the whole scroll re-colors — dowels,
+ * in components/story-scroll.tsx) and the whole scroll re-colors. Dowels,
  * parchment, and buttons all read from the same variables.
  */
 

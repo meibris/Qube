@@ -14,7 +14,7 @@ async function main() {
     // Check if lesson 2 already exists
     const existing = await sql`SELECT id FROM lessons WHERE "order" = 2`
     if (existing.length > 0) {
-        console.log(`Lesson 2 already exists (id=${existing[0].id}) — skipping insert`)
+        console.log(`Lesson 2 already exists (id=${existing[0].id}), skipping insert`)
     } else {
         const [lesson] = await sql`
             INSERT INTO lessons (title, unit_id, "order")

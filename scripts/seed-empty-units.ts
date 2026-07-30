@@ -4,7 +4,7 @@
  *
  * Run with:  npx tsx scripts/seed-empty-units.ts
  *
- * Safe to run multiple times — deletes & re-inserts idempotently.
+ * Safe to run multiple times; deletes & re-inserts idempotently.
  */
 import "dotenv/config"
 import { neon } from "@neondatabase/serverless"
@@ -20,7 +20,7 @@ const UNITS = [
     { id: 5, courseId: 5, title: "Unit 1", description: "Smart Investing",     order: 1 },
 ]
 
-// Lessons — IDs 20-26 (Budget), 30-36 (Loans), 40-46 (Assets), 50-56 (Investments)
+// Lessons, IDs 20-26 (Budget), 30-36 (Loans), 40-46 (Assets), 50-56 (Investments)
 // No challenges: these are empty placeholders for future interactive game pages.
 const LESSONS: { id: number; unitId: number; order: number; title: string }[] = [
     // ── Unit 2: Budget ────────────────────────────────────────────────────────

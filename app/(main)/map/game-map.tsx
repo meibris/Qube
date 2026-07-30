@@ -9,56 +9,95 @@ import {
   HARVEST_BERRIES, HARVEST_COOLDOWN,
   FOLIAGE_REGEN, FOLIAGE_RANGE,
   TREE_HIT_R, BUSH_HIT_R, TREE_HIT_OY, BUSH_HIT_OY,
+  MUSHROOM_HIT_R, WOOD_HIT_R, MUSHROOM_HIT_OY, WOOD_HIT_OY,
   NPC_HALF, NPC_SPEED,
-  type ImgMap, type Inventory, freshInventory,
-  drawInventoryPanel,
-  drawSharedPlayer, drawDialogBox, drawChoiceDialogBox,
+  type ImgMap, type Inventory, freshInventory, claimInventorySlot,
+  drawInventoryPanel, inventoryPanelHeight, inventorySlotIndexAt, swapInventorySlots,
+  inventoryItemCount, type InventoryDrag,
+  drawSharedPlayer, drawDialogBox, drawChoiceDialogBox, wrapCanvasText,
 } from "@/lib/game-shared"
 import {
-  PLANT_REGISTRY, FARM_SOIL_TILE_COLOR, PHASE_1_CONTENT,
-  applyPhase1Choice, payForPlotClearing, createInitialFarmPlotState,
-  type FarmPlotState, type Phase1ChoiceID, type PlantDefinition,
+  PLANT_REGISTRY, FARM_SOIL_TILE_COLOR,
+  createInitialFarmPlotState, clearPlotWithPestBugs, clearPlotWithBinkWeeder,
+  buySeedPack, plantRow, harvestRow,
+  FARM_PLOT_ROWS, FARM_PLOT_COLS, SEEDS_NEEDED, SEED_PACK_SIZE,
+  PEST_BUG_COST, SEED_PACK_COST, FARM_WEEDER_COST, FARM_WEEDER_FEE_PER_SALE,
+  type FarmPlotState, type PlantDefinition,
 } from "@/lib/farm-plot"
-// sustenanceSpeedMult intentionally omitted — speed is flat regardless of energy
+import { StoryScroll, type StoryScrollData } from "@/components/story-scroll"
+import { FarmMarket, FARM_BREAD_COST } from "@/components/farm-market"
+// sustenanceSpeedMult intentionally omitted, speed is flat regardless of energy
 
-export type MapVariant = "lesson1" | "lessonFarm" | "lessonBudget" | "lessonLoans" | "lessonInvest"
+// ─── Dialogue typewriter ───────────────────────────────────────────────────
+// Advances a per-frame reveal counter for whatever line is currently on
+// screen; resets automatically whenever the line text changes.
+const TYPE_SPEED = 1.4 // chars revealed per frame (~fastish at 60fps); single global knob for every dialogue box, present and future
+function typeReveal(s: { typeText: string; typeChars: number }, text: string): number {
+  if (s.typeText !== text) { s.typeText = text; s.typeChars = 0 }
+  s.typeChars = Math.min(text.length, s.typeChars + TYPE_SPEED)
+  return Math.floor(s.typeChars)
+}
+
+export type MapVariant = "lesson1" | "lessonFarm" | "lessonBudget" | "lessonLoans" | "lessonInvest" | "lessonFish"
 
 // ─── World constants ──────────────────────────────────────────────────────────
 const TS=32, MAP_W=88, MAP_H=58
 const SPEED=SHARED_SPEED, PLAYER_R=SHARED_PLAYER_R
-const MAP_DRAIN = SUSTENANCE_MAX / (60 * 90) // die in ~90 s without eating
+const MAP_DRAIN = 1 / (60 * 5) // 1% every 5 seconds at 60fps
 
 // ─── Lesson 1 constants ───────────────────────────────────────────────────────
 const L1_NPC_MAX_TRADES=5, L1_NPC_BUY_RESET=7200
-const L1_COIN_PER_BERRY=1, L1_TIP_COINS=2, L1_COIN_GOAL=20
-const GOV_R=14, GOV_SPEED=0.6
-const GOV_HOME_C=37, GOV_HOME_R=38
-const GOV_WANDER=3*TS, GOV_INTERACT=2.5*TS
-const TAX_RATE=0.10
+const L1_TIP_COINS=2, L1_FORAGE_GOAL=10
+// Three tour-stop props near spawn — "read the sign" flavor moments, no
+// map-generation footprint (unlike the shared BUILDING_DEFS structures used
+// by other lessons), just small world-space props next to the player's start.
+// Rows 24-28 (cols 20-54) are carved into water to split the main island
+// (see buildMap's north/south split), so these stay north of that gap.
+const L1_HUT_X=38*TS, L1_HUT_Y=17*TS
+const L1_SHED_X=33*TS, L1_SHED_Y=19*TS
+const L1_HALL_X=43*TS, L1_HALL_Y=19*TS
+const L1_TOUR_STOPS=[
+  {x:L1_HUT_X,  y:L1_HUT_Y,  label:"Your Hut",  color:"#3b82f6", sign:"Your Hut — your home base."},
+  {x:L1_SHED_X, y:L1_SHED_Y, label:"Town Shed", color:"#92400e", sign:"Town Shed — tools, borrowed gear."},
+  {x:L1_HALL_X, y:L1_HALL_Y, label:"Town Hall", color:"#6366f1", sign:"Town Hall — quests, announcements."},
+]
+const L1_TOUR_INTERACT=TS*1.8
 
 // ─── Lesson Farm constants ────────────────────────────────────────────────────
-// Plot sits just west of the Income Center (the "town center" building) — same
-// shared island every lesson plays on, just a new patch of ground + two NPCs.
-const FARM_PLOT_C1=29, FARM_PLOT_C2=33, FARM_PLOT_R1=32, FARM_PLOT_R2=36
-const FARM_BINK_C=34, FARM_BINK_R=34
-const FARM_MACHINE_C=35, FARM_MACHINE_R=34
-const FARM_DIG_TILES=[{c:30,r:33},{c:32,r:34},{c:30,r:35}]
-const FARM_DIG_SPOTS=FARM_DIG_TILES.map(p=>({wx:(p.c+0.5)*TS,wy:(p.r+0.5)*TS}))
+// Plot sits just west of the Income Center (the "town center" building), same
+// shared island every lesson plays on, just a new patch of ground + NPCs.
+// 4×4 grid (16 spots) so "2 seed packs of 8" cleanly covers the whole plot.
+const FARM_PLOT_C1=29, FARM_PLOT_C2=32, FARM_PLOT_R1=34, FARM_PLOT_R2=37
+// Bink loiters on the path toward the Market — that's where he interrupts.
+const FARM_BINK_C=63, FARM_BINK_R=43
 const FARM_BINK_X=(FARM_BINK_C+0.5)*TS, FARM_BINK_Y=(FARM_BINK_R+0.5)*TS
-const FARM_MACHINE_X=(FARM_MACHINE_C+0.5)*TS, FARM_MACHINE_Y=(FARM_MACHINE_R+0.5)*TS
 const FARM_INTERACT=TS*2.2
+const FARM_ROW_CENTERS=Array.from({length:FARM_PLOT_ROWS},(_,i)=>({
+  wx:(FARM_PLOT_C1+FARM_PLOT_C2+1)/2*TS,
+  wy:(FARM_PLOT_R1+i+0.5)*TS,
+}))
 
 // ─── Foliage draw sizes ───────────────────────────────────────────────────────
 const TREE_DW=64, TREE_DH=64, BUSH_DW=48, BUSH_DH=24
 
 // ─── Lesson 1 stages ──────────────────────────────────────────────────────────
-const L1_INTRO=0, L1_HARVEST=1, L1_SELL_INTRO=2
-const L1_SELLING=3, L1_GROSS_TALK=4, L1_GOV_TAX=5, L1_COMPLETE=6
+// Linear flow: Bloo teaches move/harvest/eat → a quick building tour (Market,
+// Town Shed, Town Hall, your Hut) doubling as the forage-goal pitch → free
+// foraging until 10 items → walk to the Market and sell everything → wrap-up.
+// No taxes, no gross-income talk — just the basic gather → sell loop.
+const L1_INTRO=0, L1_HARVEST=1, L1_TOUR=2, L1_FORAGE=3
+const L1_SELL_INTRO=4, L1_SELLING=5, L1_WRAP_UP=6, L1_COMPLETE=7
 
 // ─── Lesson Farm stages ───────────────────────────────────────────────────────
-const FARM_TALK_BLOO=0, FARM_FIND_BINK=1, FARM_CHOICE=2
-const FARM_TASK_LOAN=3, FARM_TASK_MACHINE=4, FARM_TASK_DIG=5
-const FARM_TRAP_OUTCOME=6, FARM_PLANT_REVEAL=7, FARM_COMPLETE=8
+// Linear flow: Bloo explains the plot needs Pest-Bugs from the Market →
+// walking there, Bink interrupts with his cheap Quick-Zap Weeder → an
+// official StoryScroll (both options clear the plot instantly; the real
+// difference is debt-if-short vs a forever per-sale fee) → plant reveal →
+// Bloo pitches buying seeds (no funding decision this time, just go buy
+// them) → buy seed packs → plant each row → harvest & sell each row → wrap-up.
+const FARM_TALK_BLOO=0, FARM_TO_MARKET=1, FARM_BINK_INTERRUPT=2, FARM_CLEAR_CHOICE=3
+const FARM_RESOLVE_CLEARING=4, FARM_PLANT_REVEAL=5, FARM_SEEDS_PITCH=6, FARM_TO_MARKET_SEEDS=7
+const FARM_PLANTING=8, FARM_HARVEST=9, FARM_WRAP_UP=10, FARM_COMPLETE=11
 
 // ─── Lesson Budget (Lesson 10) stages ────────────────────────────────────────
 const LB_INTRO=0, LB_EXPLORE=1, LB_BLOO_BUDGET=2, LB_COMPLETE=3
@@ -69,58 +108,84 @@ const LIV_TRADES_NEEDED=4,LIV_START_BERRIES=8,LIV_BOAT_SPEED=0.5
 const LIV_BREAD_COST=1,LIV_SEED_COST=2,LIV_WOOD_COST=3
 const LIV_SEED_BERRY_YIELD=5,LIV_SEED_GROW_FRAMES=900,LIV_WOOD_COINS=7
 // Port position: north shore of main island near top-center
-const LIV_PORT_C=41,LIV_PORT_R=18
+const LIV_PORT_C=41,LIV_PORT_R=17
 const LIV_PORT_X=(LIV_PORT_C+0.5)*TS,LIV_PORT_Y=(LIV_PORT_R+0.5)*TS
 // Boat: starts in water above the dock, moves north off screen
-const LIV_BOAT_X=(LIV_PORT_C+0.5)*TS,LIV_BOAT_START_Y=12*TS
+const LIV_BOAT_X=(LIV_PORT_C+0.5)*TS,LIV_BOAT_START_Y=11*TS
 // ─── Lesson Loans (Lesson 19) stages ─────────────────────────────────────────
 const LL_INTRO=0, LL_EXPLORE=1, LL_BLOO_TALK=2, LL_BANK=3, LL_COMPLETE=4
 const LB_NPC_MAX_TRADES=5, LB_NPC_BUY_RESET=7200
 const LB_COIN_PER_BERRY=1, LB_TIP_COINS=2
+
+// ─── Lesson Fish (Lesson 5) stages ────────────────────────────────────────────
+// Linear flow: Bloo explains the pier needs gear → walking toward the Market
+// Tallo interrupts with a cheap-but-risky rod to borrow → a dialogue choice
+// isn't enough here since real money's on the line, so it's an official
+// StoryScroll (buy vs borrow) → buy bait at the Market → head to the pier and
+// fish a short session → wrap-up.
+const FISH_TALK_BLOO=0, FISH_TO_MARKET=1, FISH_TALLO_INTERRUPT=2, FISH_ROD_CHOICE=3
+const FISH_BUY_BAIT=4, FISH_TO_PIER=5, FISH_FISHING=6, FISH_WRAP_UP=7, FISH_COMPLETE=8
+const FISH_ROD_COST=100, FISH_BAIT_COST=10, FISH_BORROW_COST=5
+const FISH_BORROW_SNAP_CHANCE=0.25, FISH_CASTS_NEEDED=3
+// Tallo loiters just outside the Community Cottage, that's where the town
+// lets you borrow gear (like a cheap spare fishing rod) for a small price.
+const FISH_TALLO_C=11, FISH_TALLO_R=29
+const FISH_TALLO_X=(FISH_TALLO_C+0.5)*TS, FISH_TALLO_Y=(FISH_TALLO_R+0.5)*TS
+// The pier reuses the Lesson Invest port dock, same shared island, just a
+// different lesson using the same waterfront prop.
+const FISH_PIER_X=LIV_PORT_X, FISH_PIER_Y=LIV_PORT_Y+TS
+const FISH_INTERACT=TS*2.2
 // asking prices for each BUILDING_DEFS entry; 0 = not for sale (bank)
 const HOUSE_PRICES=[0,500,350,400,800]
 
 // ─── Lesson 1 dialogues ───────────────────────────────────────────────────────
 const L1_BLOO_INTRO: string[] = [
-  "Hey there! I'm Bloo, your guide on this island! 👋",
-  "Congrats on arriving! Your job here is Berry Collector — you harvest and sell berries.",
+  "Hi! Welcome to the island. I'm Bloo, your guide! 👋",
+  "Before you can build anything or run a town, you need to learn how the island works.",
   "Move around with WASD or the arrow keys.",
   "See those trees and bushes? Walk up and press [Z] to harvest berries!",
-  "You also need to eat to stay alive — press [X] to eat a berry.",
-  "Go try it — harvest a berry and eat it!",
+  "You also need to eat to stay alive, press [X] to eat a berry.",
+  "Go try it, harvest a berry and eat it!",
 ]
 const L1_BLOO_HARVEST_REMIND: string[] = [
   "Head to one of those trees or bushes and press [Z] to harvest!",
   "Once you have berries, press [X] to eat one. Stay fed!",
 ]
-const L1_BLOO_SELL: string[] = [
-  "Wasn't that berry so tasty? 😋 Nice work staying fed!",
-  "Those colored squares wandering around? Those are the villagers.",
-  "Walk up to any of them and press [Z] to sell a berry for 1 coin.",
-  "Each one can only buy 5 berries at a time — visit all of them!",
-  "Psst… the green Market Trader might throw in a little something extra… 👀",
-  "Your goal: earn 20 coins! Go!",
+const L1_BLOO_TOUR: string[] = [
+  "Nice! Exploring takes energy, and eating keeps you going. Now let's take a quick look around town.",
+  "Walk up to any building and press [Z] to read its sign.",
+  "The Market sells and buys items. The Town Shed has tools and borrowed gear.",
+  "Town Hall posts quests and announcements. And that's your Hut, your home base.",
+  "You'll use these places a lot.",
+  "This island is also full of things to gather: berries on bushes and trees, mushrooms on the ground, and wood near fallen branches.",
+  "Everything here can be picked up and sold at the Market. It's the most basic income source!",
+  `Collect ${L1_FORAGE_GOAL} items, any mix you want, then sell them at the Market! Go!`,
 ]
-const L1_BLOO_GROSS: string[] = [
-  "You did it! 20 coins! 🎉",
-  "Those 20 coins are your gross income —",
-  "everything you earned BEFORE any deductions or taxes.",
-  "Uh oh… I see the Governor heading this way. He might want a cut…",
+const L1_BLOO_SELL_INTRO: string[] = [
+  "Nice haul! Let's go sell it at the Market.",
+  "Those colored squares wandering around? Walk up to any of them and press [Z] to sell.",
+  "Each one can only buy 5 items at a time, so visit a few if you've got lots!",
+  "Psst… the green Market Trader sometimes tosses in a bonus coin for rare mushrooms. 👀",
 ]
-const L1_GOV_TAX_LINE = "Excuse me — I'll be taking 10 % of your income as tax."
+const L1_BLOO_WRAP_UP: string[] = [
+  "Great job! You learned how to move, gather, eat, and sell.",
+  "Foraging is your first income source, now you know how coins flow through the island!",
+  "Now that you understand the basics, we can explore more ways to earn coins.",
+  "Farming, fishing, crafting… your island has lots of opportunities!",
+]
 
 const NPC_NAMES = ["Budget Rep","Savings Banker","Tax Agent","Market Trader"]
 const L1_NPC_OFFER: string[] = [
   "Budget's tight, but I'll buy a berry for 1 coin.",
-  "Oh, fresh berries! I'll take one — 1 coin each.",
+  "Oh, fresh berries! I'll take one, 1 coin each.",
   "... Fine. 1 coin per berry. Make it quick.",
-  "Welcome! I'll buy a berry for 1 coin — and hey, I might have a little extra for you! 😉",
+  "Welcome! I'll buy a berry for 1 coin, and hey, I might have a little extra for you! 😉",
 ]
 const L1_NPC_SOLD: string[] = [
-  "Thanks. Every coin counts — remember that!",
+  "Thanks. Every coin counts, remember that!",
   "Mmm, fresh! Come back if you have more.",
   "Hmph. I suppose it was worth it.",
-  "Here you go — and keep the extra change! You're doing great, kid! 🎉",
+  "Here you go, and keep the extra change! You're doing great, kid! 🎉",
 ]
 const L1_NPC_FULL: string[] = [
   "I've had my fill for now. Come back in a bit!",
@@ -138,45 +203,56 @@ const L1_NPC_NO_BERRY: string[] = [
 
 // ─── Lesson Farm dialogues ──────────────────────────────────────────────────────
 const FARM_BLOO_INTRO: string[] = [
-  "Hey! Ready to start your own little farm? 🌱",
-  "There's an overgrown plot just west of the town center — perfect, but it needs clearing first.",
-  "You'll need 100 coins for seeds and land clearing.",
-  "I saw someone new hanging around by the plot. They might have ideas about money. Go talk to them!",
+  "Your island needs a steady income source, farming is perfect for that! 🌾",
+  "I dug out a small plot of land you can use.",
+  "It's just west of the town center, overgrown with weeds, but the soil underneath looks rich.",
+  `We need to clear the weeds first. The Market sells Pest-Bugs that can clear the whole plot instantly, but they cost ${PEST_BUG_COST} coins. Let's go check it out.`,
 ]
-const FARM_BINK_INTRO: string[] = [
-  "Well, well. Another little farm popping up.",
-  "I'm building something BIG here — a giant Mega-Mall. One huge store, everything you need, no more little plots.",
-  "Small farms like yours? Cute. But you're in my way.",
-  "Still, I'm not heartless. Need help covering that 100 coins? I've got options for you...",
+// Back-and-forth exchange while walking toward the Market — speaker alternates
+// per line. Bink never actually spells out the real cost; Bloo gets suspicious
+// and asks, but Bink only half-answers. The player finds out what "convenience
+// fee" really meant later, at harvest time.
+const FARM_BINK_INTERRUPT_LINES: string[] = [
+  "Forget the Market! My Quick-Zap Weeder clears the plot instantly.",
+  `Only ${FARM_WEEDER_COST} coins to use it!`,
+  "Wait… what's the catch, Bink?",
+  "Catch? Ha! There's no big catch. Maybe a tiny convenience fee here and there. Barely worth mentioning!",
+  "Hmm… convenient for who, exactly?",
 ]
-const FARM_LOAN_LINE = "Sign here — 100 coins, coming right up. Just remember: you'll owe 12 coins every time you sell a batch of 5 plants."
-const FARM_MACHINE_LINE = "Ta-da! 5 coins, just like that. (...and 10% of every harvest, forever. Don't worry about the fine print.)"
-const FARM_DIG_LINE = "Scatter the rotten berries and let the bugs do the work!"
+const FARM_BINK_INTERRUPT_SPEAKERS: ("Bink"|"Bloo")[] = ["Bink","Bink","Bloo","Bink","Bloo"]
+const FARM_CLEAR_CHOICE_PROMPT = "So — Pest-Bugs at the Market, or Bink's Weeder right here?"
+const FARM_CLEAR_CHOICE_OPTIONS = [
+  { id: "bugs", icon: "🐛", text: `Buy Pest-Bugs at the Market (${PEST_BUG_COST} coins).` },
+  { id: "weeder", icon: "⚡", text: `Use Bink's Quick-Zap Weeder (${FARM_WEEDER_COST} coins).` },
+]
 function plantRevealLines(plant: PlantDefinition): string[] {
   return [
     `Whoa, look at that! ${plant.emoji} ${plant.name}!`,
     plant.vibe,
     plant.mechanic,
-    `That's actually teaching you about ${plant.concept} — pretty cool, huh?`,
+    `That's actually teaching you about ${plant.concept}, pretty cool, huh?`,
   ]
 }
-function farmTrapLines(state: FarmPlotState): string[] {
-  return [
-    "Hmm, only 5 coins... that's not enough to clear the plot yet.",
-    `You'll owe Bink ${Math.round(state.binkCropInterestRate*100)}% of every harvest you ever make here — forever.`,
-    "Come back once you've earned more coins elsewhere, and we'll try again.",
-  ]
-}
+const FARM_SEEDS_PITCH_LINES: string[] = [
+  "Whoa, both choices cleared the plot! One's expensive but clean, the other's cheap but suspicious.",
+  "Now we need seeds! Two packs will fill all 16 tiles.",
+  `Seed Packs are ${SEED_PACK_COST} coins each at the Market, let's go grab 2!`,
+]
+const FARM_WRAP_UP_LINES: string[] = [
+  "Farming is a steady income source.",
+  "Some tools cost more upfront, others cost more later.",
+  "From now on, you must choose how you earn.",
+]
 
 // ─── Lesson Budget dialogues ──────────────────────────────────────────────────
 const LB_BLOO_INTRO: string[] = [
-  "Hey there! Welcome back to the island. Here — I scraped together 10 berries for you. 🍒",
-  "Keep eating them — your energy drains over time. Press [X] to eat!",
+  "Hey there! Welcome back to the island. Here, I scraped together 10 berries for you. 🍒",
+  "Keep eating them, your energy drains over time. Press [X] to eat!",
   "I heard there are some properties for sale around here.",
   "Walk up to any building and press [Z] to check out the price!",
 ]
 const LB_BLOO_BUDGET_TALK: string[] = [
-  "Wow, that's expensive! But don't panic — this is exactly why budgets matter. 📊",
+  "Wow, that's expensive! But don't panic, this is exactly why budgets matter. 📊",
   "A budget helps you plan: track what you earn, what you spend, and what you save.",
   "Start saving now, and you could work toward something like that someday!",
 ]
@@ -186,36 +262,69 @@ const LL_BLOO_INTRO: string[] = [
   "Walk up to any building and press [Z] to check out the price!",
 ]
 const LL_BLOO_LOAN: string[] = [
-  "You don't have enough money? Sorry, I can't help — I'm struggling too. 😬",
+  "You don't have enough money? Sorry, I can't help, I'm struggling too. 😬",
   "Looks like you'll need a loan!",
-  "Head to that blue building in the center — it's the bank. They can help you!",
+  "Head to that blue building in the center, it's the bank. They can help you!",
 ]
 
 // ─── Lesson Invest dialogues ──────────────────────────────────────────────────
 const LIV_BLOO_INTRO: string[] = [
   "Welcome to the Island Trading Center! 🌊",
   "See that dock to the north? Our island ships goods to distant islands from there.",
-  "Each island specializes in something — ours grows the best berries around!",
+  "Each island specializes in something, ours grows the best berries around!",
   "When we produce more than we need, we ship the surplus to islands that want it.",
-  "They send back goods or coins we can't produce ourselves — that's how trade works.",
+  "They send back goods or coins we can't produce ourselves, that's how trade works.",
   "There's a trade vessel at the dock right now. Let's watch it depart!",
 ]
 const LIV_BLOO_BOAT: string[] = [
   "See that vessel heading north? It's carrying our berries to the Northern Archipelago.",
   "They can't grow berries up there, so ours are very valuable to them.",
   "In exchange, they'll send back timber we need to expand these very docks.",
-  "Both islands end up better off — that's the whole point of trade.",
+  "Both islands end up better off, that's the whole point of trade.",
   "Ports like this one connect islands that each have something the other needs.",
   "Your turn! Walk to the Port Trader at the dock and press [Z] to trade.",
 ]
+
+// ─── Lesson Fish dialogues ─────────────────────────────────────────────────────
+const FISH_BLOO_INTRO: string[] = [
+  "Your farm is running great… now it's time to unlock another income source: Fishing! 🎣",
+  "The pier is ready, all you need is gear.",
+  "See that sign? \"Fishing Allowed: Gear + Bait Required.\" You don't own any equipment yet.",
+  `A Basic Rod costs ${FISH_ROD_COST} coins at the Market, and bait is ${FISH_BAIT_COST} coins a can. Let's go check it out!`,
+]
+const FISH_TALLO_INTERRUPT_LINES: string[] = [
+  "Whoa there! Heading to buy a rod?",
+  `We keep spares right here at the Community Cottage, you can borrow one instead, only ${FISH_BORROW_COST} coins for the whole lesson!`,
+  "It works fine... mostly. If it snaps, you'll lose whatever you were reeling in.",
+  "So, buy a rod of your own, or borrow mine? Your call!",
+]
+function fishRodScroll(coins:number): StoryScrollData {
+  return {
+    title: "Gear Up for Fishing",
+    body: `You've got ${coins} coins. A Basic Rod costs ${FISH_ROD_COST} coins, yours to keep, no breakage risk. Tallo's spare rod is only ${FISH_BORROW_COST} coins, but it has a ${Math.round(FISH_BORROW_SNAP_CHANCE*100)}% chance of snapping each cast, and if it snaps, you lose that catch.`,
+    choices: [
+      { id: "buy", icon: "🎣", text: `Buy the Basic Rod (${FISH_ROD_COST} coins).` },
+      { id: "borrow", icon: "🤝", text: `Borrow Tallo's rod (${FISH_BORROW_COST} coins).` },
+    ],
+  }
+}
+function fishWrapLines(rodBorrowed:boolean): string[] {
+  const bloo=[
+    "Fishing is another way your town earns money.",
+    "Some income sources are stable, others are risky. Today you chose how you wanted to earn.",
+    "Now your town has two income sources, farming and fishing. More income means more ways to grow your island!",
+  ]
+  return rodBorrowed?[...bloo,"Thanks for trying it out! Bring it back anytime… if it's still in one piece. -Tallo"]:bloo
+}
 
 // ─── Island shapes ────────────────────────────────────────────────────────────
 interface Island { cr:number; cc:number; rx:number; ry:number }
 const ISLANDS: Island[] = [
   { cr:29, cc:37, rx:17, ry:14 },
-  { cr:16, cc:9,  rx:9,  ry:8  },
-  { cr:11, cc:73, rx:8,  ry:8  },
-  { cr:45, cc:73, rx:8,  ry:8  },
+  { cr:26, cc:9,  rx:9,  ry:8  },
+  { cr:11, cc:63, rx:8,  ry:8  },
+  { cr:40, cc:69, rx:8,  ry:8  },
+  { cr:10, cc:48, rx:2.05, ry:1.1 },   // tiny stepping-stone island between the main island and Tax Office island
 ]
 function isLand(r:number, c:number): boolean {
   for (const isl of ISLANDS) {
@@ -233,18 +342,18 @@ const WATER=0, GRASS=1, FLOWER=2, PATH=3
 const B_INCOME=4, B_TAX=5, B_BUDGET=6, B_SAVINGS=7, B_MARKET=8
 type TileID = 0|1|2|3|4|5|6|7|8
 const BUILDING_DEFS: BuildingDef[] = [
-  { tile:B_INCOME,  r1:20, r2:24, c1:27, c2:32, color:"#3b82f6", border:"#1d4ed8", label:["Income","Center"], svg:"house" },
-  { tile:B_BUDGET,  r1:29, r2:33, c1:39, c2:44, color:"#8b5cf6", border:"#6d28d9", label:["Budget","HQ"],     svg:"cabin" },
-  { tile:B_SAVINGS, r1:14, r2:18, c1:5,  c2:10, color:"#f59e0b", border:"#b45309", label:["Savings","Bank"],  svg:"tallcabin" },
-  { tile:B_TAX,     r1:9,  r2:13, c1:70, c2:75, color:"#ef4444", border:"#b91c1c", label:["Tax","Office"],    svg:"tallhouse" },
-  { tile:B_MARKET,  r1:43, r2:47, c1:70, c2:75, color:"#10b981", border:"#065f46", label:["Market"],          svg:"markethouse" },
+  { tile:B_INCOME,  r1:19, r2:23, c1:27, c2:32, color:"#3b82f6", border:"#1d4ed8", label:["Income","Center"], svg:"house" },
+  { tile:B_BUDGET,  r1:31, r2:35, c1:39, c2:44, color:"#8b5cf6", border:"#6d28d9", label:["Budget","HQ"],     svg:"cabin" },
+  { tile:B_SAVINGS, r1:24, r2:28, c1:5,  c2:10, color:"#f59e0b", border:"#b45309", label:["Community","Cottage"],  svg:"tallcabin" },
+  { tile:B_TAX,     r1:9,  r2:13, c1:60, c2:65, color:"#ef4444", border:"#b91c1c", label:["The","Bank"],    svg:"tallhouse" },
+  { tile:B_MARKET,  r1:38, r2:42, c1:66, c2:71, color:"#10b981", border:"#065f46", label:["Market"],          svg:"markethouse" },
 ]
 const ENTRANCES = [
-  { name:"Income Center", wx:30*TS, wy:25*TS },
-  { name:"Budget HQ",     wx:42*TS, wy:34*TS },
-  { name:"Savings Bank",  wx:8*TS,  wy:19*TS },
-  { name:"Tax Office",    wx:73*TS, wy:14*TS },
-  { name:"Market",        wx:73*TS, wy:48*TS },
+  { name:"Income Center", wx:30*TS, wy:24*TS },
+  { name:"Budget HQ",     wx:42*TS, wy:36*TS },
+  { name:"Community Cottage", wx:8*TS,  wy:29*TS },
+  { name:"The Bank",      wx:63*TS, wy:14*TS },
+  { name:"Market",        wx:69*TS, wy:43*TS },
 ]
 
 // ─── Map generation ───────────────────────────────────────────────────────────
@@ -267,16 +376,20 @@ function buildMap(): TileID[][] {
     }
   }
   for (let r=0; r<MAP_H; r++) for (let c=0; c<MAP_W; c++) if (isLand(r,c)) m[r][c]=GRASS
-  for (let c=0; c<MAP_W; c++) if (m[25][c]===GRASS||m[26][c]===GRASS) { if (c>=20&&c<=54) { m[25][c]=WATER; m[26][c]=WATER } }
+  // Split the main island: the north half (Income Center) sits 1 block higher,
+  // the south half (Budget HQ, farm plot) sits 2 blocks lower, so the water
+  // gap between them is wider than the original 2-row notch.
+  for (let c=20; c<=54; c++) for (const rr of [24,25,26,27,28]) if (m[rr][c]===GRASS) m[rr][c]=WATER
   // Main island roads (interior, no water-edge bridge artifacts)
-  fill(22,23,25,51,PATH)    // top horizontal road (cleanly inland c=25–51)
-  fill(28,29,22,54,PATH)    // bottom horizontal road (inland c=22–54)
-  fill(22,29,40,41,PATH)    // interior vertical connector
-  fill(19,22,29,30,PATH); fill(19,19,29,33,PATH)
-  fill(28,34,43,44,PATH); fill(28,28,38,44,PATH)
-  fill(16,19,9,14,PATH);  fill(13,16,7,8,PATH);   fill(13,13,7,11,PATH)
-  fill(10,15,65,68,PATH); fill(10,10,66,73,PATH)
-  fill(45,48,65,68,PATH); fill(45,45,66,73,PATH);  fill(44,45,65,66,PATH)
+  fill(21,22,25,51,PATH)    // top horizontal road (cleanly inland c=25–51)
+  fill(30,31,22,54,PATH)    // bottom horizontal road (inland c=22–54)
+  fill(21,31,40,41,PATH)    // interior vertical connector, bridges the split
+  fill(26,30,36,46,PATH)    // wide patch above Budget HQ, connects to the bridge
+  fill(18,21,29,30,PATH); fill(18,18,29,33,PATH)
+  fill(30,36,43,44,PATH); fill(30,30,38,44,PATH)
+  fill(26,29,9,14,PATH);  fill(23,26,7,8,PATH);   fill(23,23,7,11,PATH)
+  fill(10,15,56,58,PATH); fill(10,10,56,63,PATH)
+  fill(40,43,62,64,PATH); fill(40,40,62,69,PATH);  fill(39,40,62,63,PATH)
   {
     const scatter = (r:number, c:number, pct:number) => {
       if (r<0||r>=MAP_H||c<0||c>=MAP_W||m[r][c]!==PATH) return
@@ -300,12 +413,41 @@ function buildMap(): TileID[][] {
   }
   for (const b of BUILDING_DEFS) fill(b.r1,b.r2,b.c1,b.c2,b.tile)
   // Remove floating bridge planks above Income Center (building surround put PATH in water zone)
-  fill(17,17,26,28,WATER)
-  fill(18,18,26,27,WATER)
-  // Delete stray path tiles below Income Center (green circles)
-  fill(25,26,25,30,GRASS)
-  // Delete stray path tiles before Budget HQ approach (green circles)
-  fill(26,27,38,40,GRASS)
+  fill(16,16,26,28,WATER)
+  fill(17,17,26,27,WATER)
+  // Trim stray shoreline nubs poking out from the island wobble shape
+  fill(18,18,11,13,WATER)   // small north nub above Savings Bank island
+  fill(9,14,69,71,WATER)    // east-side bulge on Tax Office island
+  // Extend the main island's north cape toward the little stepping-stone
+  // island, tapering as it goes, fills in the ragged edge without touching
+  // it. Only turns WATER into GRASS so it never overwrites the road.
+  {
+    const growLand = (r1:number, r2:number, c1:number, c2:number) => {
+      for (let r=r1; r<=r2; r++) for (let c=c1; c<=c2; c++) if (m[r][c]===WATER) m[r][c]=GRASS
+    }
+    growLand(20,22,44,51)
+    growLand(18,19,44,51)
+    growLand(16,17,45,50)
+    growLand(14,15,46,49)
+  }
+  // Inter-island bridge tiles (see BRIDGES/drawBridges below) stay WATER here;
+  // they're drawn as wooden bridge sprites over the water, not sandy path.
+  // Decorative patches: small grass tufts inside courtyards and sandy
+  // patches inside grass fields, for visual variety.
+  {
+    const patch = (cells:[number,number][], t:TileID) => { for (const [r,c] of cells) m[r][c]=t }
+    patch([[21,4],[22,4],[22,5],[23,4],[24,4],[25,4],[26,4],[27,4],[28,4]], GRASS) // Savings Bank courtyard, west side
+    patch([[16,38],[17,38],[17,39],[18,38]], PATH)   // Income Center field, west patch
+    patch([[17,48],[17,49],[18,48]], PATH)           // Income Center field, east patch
+    patch([[29,40],[29,41],[30,40],[30,41]], GRASS)  // bridge over the split, grass tuft
+    patch([[35,33],[35,34],[36,33],[36,34]], PATH)   // Budget HQ / farm courtyard, near Bink
+    patch([[6,60],[6,61],[7,61]], GRASS)             // Tax Office courtyard, north patch
+    patch([[14,63],[15,63]], GRASS)                  // Tax Office courtyard, south patch
+    patch([[35,68],[35,69],[36,68]], GRASS)          // Market courtyard, north patch
+    patch([[29,27],[29,28]], PATH)                   // Budget HQ / farm courtyard, west patch
+    patch([[29,34],[29,35]], PATH)                   // Budget HQ / farm courtyard, middle patch
+    patch([[29,36],[29,37]], PATH)                   // Budget HQ / farm courtyard, east patch
+  }
   for (let r=0; r<MAP_H; r++) { GRASS_LAYER.push(new Array(MAP_W).fill(0)); FLOWER_MAP.push(new Array(MAP_W).fill(false)) }
   const seeds: {r:number;c:number;type:number}[] = []
   const prng = (n:number) => ((n*1664525+1013904223)&0xffffffff)>>>0
@@ -322,7 +464,7 @@ function buildMap(): TileID[][] {
     for (const s of seeds) { const d=(r-s.r)**2+(c-s.c)**2; if (d<best) { best=d; bestType=s.type } }
     GRASS_LAYER[r][c]=bestType
   }
-  const flowerCenters=[[7,4],[9,14],[23,32],[33,30],[35,50],[13,78],[7,77],[47,78],[39,52],[22,25]]
+  const flowerCenters=[[17,4],[19,14],[22,32],[35,30],[37,50],[13,68],[7,67],[42,74],[41,52],[21,25]]
   for (const [fr,fc] of flowerCenters) {
     for (let r=fr-5; r<=fr+5; r++) for (let c=fc-5; c<=fc+5; c++) {
       if (r<0||r>=MAP_H||c<0||c>=MAP_W||m[r][c]!==GRASS) continue
@@ -352,13 +494,13 @@ const GRASS_EDGE: boolean[][] = (() => {
   return edge
 })()
 
-// ─── Path edge tiles (border water or a darkened grass edge) ─────────────────
+// ─── Path edge tiles (border water directly; wet grass alone doesn't count) ──
 const PATH_EDGE: boolean[][] = (() => {
   const edge = Array.from({length:MAP_H}, () => new Array<boolean>(MAP_W).fill(false))
   for (let r=0; r<MAP_H; r++) for (let c=0; c<MAP_W; c++) {
     if (MAP[r][c]!==PATH) continue
     const nbrs = [[r-1,c],[r+1,c],[r,c-1],[r,c+1]]
-    if (nbrs.some(([nr,nc]) => nr>=0&&nr<MAP_H&&nc>=0&&nc<MAP_W&&(MAP[nr][nc]===WATER||GRASS_EDGE[nr]?.[nc]))) edge[r][c]=true
+    if (nbrs.some(([nr,nc]) => nr>=0&&nr<MAP_H&&nc>=0&&nc<MAP_W&&MAP[nr][nc]===WATER)) edge[r][c]=true
   }
   return edge
 })()
@@ -371,11 +513,17 @@ async function loadImages(): Promise<ImgMap> {
   return Promise.all([
     ...pngNames.map(n=>new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs[n]=img;res()};img.onerror=()=>res();img.src=`/${n}.png`})),
     ...woodSvgNames.map(n=>new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs[n]=img;res()};img.onerror=()=>res();img.src=`/woodbuildings/${n}.svg`})),
-    new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["berry"]=img;res()};img.onerror=()=>res();img.src="/Berry.png"}),
+    new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["bridgePiece"]=img;res()};img.onerror=()=>res();img.src="/bridge-piece.png"}),
+    new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["berry"]=img;res()};img.onerror=()=>res();img.src="/strawberry.svg"}),
+    new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["apple"]=img;res()};img.onerror=()=>res();img.src="/apple.svg"}),
+    new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["bread"]=img;res()};img.onerror=()=>res();img.src="/bread.svg"}),
+    new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["coin"]=img;res()};img.onerror=()=>res();img.src="/coin.svg"}),
     new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["treeApples"]=img;res()};img.onerror=()=>res();img.src="/treeApples.png"}),
     new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["treeNoApples"]=img;res()};img.onerror=()=>res();img.src="/treeNoApples.png"}),
     new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["bushBerry"]=img;res()};img.onerror=()=>res();img.src="/BushBerry.png"}),
     new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["bushNoBerry"]=img;res()};img.onerror=()=>res();img.src="/BushNoBerry.png"}),
+    new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["outdoorDecor"]=img;res()};img.onerror=()=>res();img.src="/Outdoor decoration/Outdoor_Decor_Free.png"}),
+    new Promise<void>(res=>{const img=new Image();img.onload=()=>{imgs["biomThings"]=img;res()};img.onerror=()=>res();img.src="/Basic_Grass_Biom_things.png"}),
   ]).then(()=>imgs)
 }
 
@@ -425,9 +573,72 @@ function computeBuildingBounds(imgs:ImgMap){
     return buildingRects(b.svg,ox,oy,dw,dh)
   })
 }
+// ─── Inter-island bridges ───────────────────────────────────────────────────
+// Bridges are built from a single repeatable tile (public/bridge-piece.png),
+// laid end-to-end across the gap, no stretched single image. Four pieces
+// fill the length of one game tile (each piece is TS/4 long along the
+// bridge's direction of travel, TS across it); every piece is drawn rotated
+// an extra 90° from its orientation's natural alignment.
+//
+// Each span is only a starting point (cx,cy) + direction — the actual
+// length is discovered at load time by walking outward from that point
+// while the map tile is still WATER, so the bridge (both its sprite and
+// its walkable footprint) stops exactly at the shoreline: never spilling
+// onto land, and never wider than the single tile row/column it walks.
+const BRIDGE_PIECES_PER_TILE=4  // bridge-piece.png tiles per game-tile, lengthwise
+const BRIDGE_PIECE_LEN=TS/BRIDGE_PIECES_PER_TILE // px length of one piece along the bridge
+interface BridgeSpan{cx:number;cy:number;orientation:"h"|"v"}
+const BRIDGES: BridgeSpan[] = [
+  {cx:19,   cy:22.5, orientation:"h"}, // Community Cottage island <-> main island, upper crossing
+  {cx:18.5, cy:29.5, orientation:"h"}, // Community Cottage island <-> main island, lower crossing
+  {cx:48,   cy:12.5, orientation:"v"}, // main island cape <-> little stepping-stone island
+  {cx:53,   cy:9.5,  orientation:"h"}, // little stepping-stone island <-> Bank island
+  {cx:60,   cy:33.5, orientation:"h"}, // main island <-> Market island
+]
+interface BridgeCell{r:number;c:number;orientation:"h"|"v"}
+function bridgeCells(b:BridgeSpan):BridgeCell[]{
+  if(b.orientation==="h"){
+    const r=Math.floor(b.cy)
+    let c0=Math.floor(b.cx),c1=c0
+    while(c0>0&&MAP[r][c0-1]===WATER)c0--
+    while(c1<MAP_W-1&&MAP[r][c1+1]===WATER)c1++
+    const cells:BridgeCell[]=[];for(let c=c0;c<=c1;c++)cells.push({r,c,orientation:"h"});return cells
+  }
+  const c=Math.floor(b.cx)
+  let r0=Math.floor(b.cy),r1=r0
+  while(r0>0&&MAP[r0-1][c]===WATER)r0--
+  while(r1<MAP_H-1&&MAP[r1+1][c]===WATER)r1++
+  const cells:BridgeCell[]=[];for(let r=r0;r<=r1;r++)cells.push({r,c,orientation:"v"});return cells
+}
+const BRIDGE_CELLS: BridgeCell[] = BRIDGES.flatMap(bridgeCells)
+const BRIDGE_TILES: Set<string> = new Set(BRIDGE_CELLS.map(({r,c})=>`${r},${c}`))
+function drawBridges(ctx:CanvasRenderingContext2D,camX:number,camY:number,imgs:ImgMap){
+  const img=imgs["bridgePiece"]
+  if(!img)return
+  for(const cell of BRIDGE_CELLS){
+    // base orientation rotation (h:0°, v:90°) plus an extra 90° flip
+    const rotation=(cell.orientation==="v"?Math.PI/2:0)+Math.PI/2
+    for(let i=0;i<BRIDGE_PIECES_PER_TILE;i++){
+      let wx:number,wy:number
+      if(cell.orientation==="h"){
+        wx=cell.c*TS+(i+0.5)*BRIDGE_PIECE_LEN
+        wy=(cell.r+0.5)*TS
+      }else{
+        wx=(cell.c+0.5)*TS
+        wy=cell.r*TS+(i+0.5)*BRIDGE_PIECE_LEN
+      }
+      ctx.save()
+      ctx.translate(wx-camX,wy-camY)
+      ctx.rotate(rotation)
+      ctx.drawImage(img,-TS/2,-BRIDGE_PIECE_LEN/2,TS,BRIDGE_PIECE_LEN)
+      ctx.restore()
+    }
+  }
+}
 function isBlocking(wx:number,wy:number):boolean{
   const c=Math.floor(wx/TS),r=Math.floor(wy/TS)
   if(r<0||r>=MAP_H||c<0||c>=MAP_W)return true
+  if(BRIDGE_TILES.has(`${r},${c}`))return false
   const t=MAP[r][c]
   if(t===WATER)return true
   if(t>=B_INCOME){
@@ -437,6 +648,81 @@ function isBlocking(wx:number,wy:number):boolean{
   }
   return false
 }
+
+// ─── Ambient ground decor (mushrooms, fallen logs, lily pads/rocks) ───────────
+// Sprites come from Basic_Grass_Grass_Biom_things.png, a 9x5 grid of 16px tiles.
+// Row 1 cols 4-7: mushrooms. Row 3 col 6: fallen log. Row 5 cols 6-9: rocks/lily pads.
+const BIOM_TS=16
+const MUSHROOM_SRC=[3,4,5,6].map(ci=>({sx:ci*BIOM_TS,sy:0*BIOM_TS}))
+const LOG_SRC={sx:5*BIOM_TS,sy:2*BIOM_TS}
+const ROCK_SRC=[5,6].map(ci=>({sx:ci*BIOM_TS,sy:4*BIOM_TS}))
+const LILY_SRC=[7,8].map(ci=>({sx:ci*BIOM_TS,sy:4*BIOM_TS}))
+function biomHash(r:number,c:number,salt:number){return ((r*92821+c*68917+salt*104729)%1000+1000)%1000}
+interface DecorNode{wx:number;wy:number;variant:number}
+const MUSHROOMS: DecorNode[] = (()=>{
+  const nodes:DecorNode[]=[]
+  for(let r=0;r<MAP_H;r++)for(let c=0;c<MAP_W;c++){
+    if(MAP[r][c]!==GRASS||FLOWER_MAP[r]?.[c]||GRASS_EDGE[r]?.[c])continue
+    if(biomHash(r,c,11)<15)nodes.push({wx:(c+0.5)*TS,wy:(r+0.55)*TS,variant:biomHash(r,c,23)%MUSHROOM_SRC.length})
+  }
+  return nodes
+})()
+interface WaterDecorNode{wx:number;wy:number;kind:"rock"|"lily";variant:number}
+const WATER_DECOR: WaterDecorNode[] = (()=>{
+  const nodes:WaterDecorNode[]=[]
+  for(let r=0;r<MAP_H;r++)for(let c=0;c<MAP_W;c++){
+    if(MAP[r][c]===GRASS&&GRASS_EDGE[r]?.[c]&&biomHash(r,c,53)<180){
+      nodes.push({wx:(c+0.5)*TS,wy:(r+0.6)*TS,kind:"rock",variant:biomHash(r,c,59)%ROCK_SRC.length})
+    }
+  }
+  for(let r=0;r<MAP_H;r++)for(let c=0;c<MAP_W;c++){
+    if(MAP[r][c]!==WATER)continue
+    const nearShore=[[r-1,c],[r+1,c],[r,c-1],[r,c+1]].some(([nr,nc])=>nr>=0&&nr<MAP_H&&nc>=0&&nc<MAP_W&&(MAP[nr][nc]===GRASS||BRIDGE_TILES.has(`${nr},${nc}`)))
+    if(nearShore&&biomHash(r,c,67)<140){
+      nodes.push({wx:(c+0.5)*TS,wy:(r+0.5)*TS,kind:"lily",variant:biomHash(r,c,71)%LILY_SRC.length})
+    }
+  }
+  return nodes
+})()
+interface LogNode{wx:number;wy:number}
+function initLogs(foliage:FoliageNode[]):LogNode[]{
+  const logs:LogNode[]=[]
+  for(const t of foliage){
+    if(t.type!=="tree")continue
+    const h=biomHash(Math.round(t.wy/TS),Math.round(t.wx/TS),41)
+    if(h>=500)continue // only about half the trees get a fallen log nearby
+    const dc=h%2===0?1:-1, dr=Math.floor(h/2)%2===0?1:-1
+    const c=Math.floor(t.wx/TS)+dc, r=Math.floor(t.wy/TS)+dr
+    if(r<0||r>=MAP_H||c<0||c>=MAP_W||MAP[r][c]!==GRASS)continue
+    const lx=(c+0.5)*TS, ly=(r+0.5)*TS
+    if(foliage.some(n=>Math.hypot(n.wx-lx,n.wy-ly)<TS*0.8))continue
+    logs.push({wx:lx,wy:ly})
+  }
+  return logs
+}
+function drawBiomDecor(ctx:CanvasRenderingContext2D,camX:number,camY:number,cw:number,ch:number,imgs:ImgMap,logs:LogNode[]){
+  const img=imgs["biomThings"]
+  if(!img)return
+  const inView=(wx:number,wy:number)=>wx>camX-TS&&wx<camX+cw+TS&&wy>camY-TS&&wy<camY+ch+TS
+  for(const n of WATER_DECOR){
+    if(!inView(n.wx,n.wy))continue
+    const src=n.kind==="rock"?ROCK_SRC[n.variant]:LILY_SRC[n.variant]
+    const dw=n.kind==="rock"?TS*0.6:TS*0.55
+    ctx.drawImage(img,src.sx,src.sy,BIOM_TS,BIOM_TS,n.wx-camX-dw/2,n.wy-camY-dw/2,dw,dw)
+  }
+  for(const n of MUSHROOMS){
+    if(!inView(n.wx,n.wy))continue
+    const src=MUSHROOM_SRC[n.variant]
+    const dw=TS*0.55
+    ctx.drawImage(img,src.sx,src.sy,BIOM_TS,BIOM_TS,n.wx-camX-dw/2,n.wy-camY-dw*0.9,dw,dw)
+  }
+  for(const n of logs){
+    if(!inView(n.wx,n.wy))continue
+    const dw=TS*0.9,dh=TS*0.5
+    ctx.drawImage(img,LOG_SRC.sx,LOG_SRC.sy,BIOM_TS,BIOM_TS,n.wx-camX-dw/2,n.wy-camY-dh/2,dw,dh)
+  }
+}
+
 function resolveMove(cx:number,cy:number,dx:number,dy:number){
   const pad=PLAYER_R-2
   const hx=isBlocking(cx+dx+pad,cy+pad)||isBlocking(cx+dx-pad,cy+pad)||isBlocking(cx+dx+pad,cy-pad)||isBlocking(cx+dx-pad,cy-pad)
@@ -444,7 +730,7 @@ function resolveMove(cx:number,cy:number,dx:number,dy:number){
   return{x:Math.max(PLAYER_R,Math.min(MAP_W*TS-PLAYER_R,hx?cx:cx+dx)),y:Math.max(PLAYER_R,Math.min(MAP_H*TS-PLAYER_R,hy?cy:cy+dy))}
 }
 // Movement delta for this frame: click-and-hold pointer target takes priority
-// over WASD/arrows (mirrors the diagonal-move feel — held pointer drives the
+// over WASD/arrows (mirrors the diagonal-move feel; held pointer drives the
 // player straight toward the world point last reported by the mouse/touch).
 function computeMoveDelta(keys:Set<string>,spd:number,pointerDown:boolean,px:number,py:number,tx:number,ty:number){
   if(pointerDown){
@@ -474,13 +760,13 @@ interface NpcState{
 function initNpcs(variant:MapVariant):NpcState[]{
   const W=2
   const npcs:NpcState[]=[
-    {x:43.5*TS,y:34.5*TS,tx:43.5*TS,ty:34.5*TS,wait:60,color:"#8b5cf6",border:"#6d28d9",bx1:(39-W)*TS,bx2:(44+1+W)*TS,by1:(29-W)*TS,by2:(33+1+W)*TS,tradesDone:0,tradeTimer:0,isTipNpc:false,tipUsed:false,isMarket:false},
-    {x:11.5*TS,y:19.5*TS,tx:11.5*TS,ty:19.5*TS,wait:60,color:"#f59e0b",border:"#b45309",bx1:(5-W)*TS,bx2:(10+1+W)*TS,by1:(14-W)*TS,by2:(18+1+W)*TS,tradesDone:0,tradeTimer:0,isTipNpc:false,tipUsed:false,isMarket:false},
-    {x:67.5*TS,y:14.5*TS,tx:67.5*TS,ty:14.5*TS,wait:60,color:"#ef4444",border:"#b91c1c",bx1:(70-W)*TS,bx2:(75+1+W)*TS,by1:(9-W)*TS,by2:(13+1+W)*TS,tradesDone:0,tradeTimer:0,isTipNpc:false,tipUsed:false,isMarket:false},
-    {x:67.5*TS,y:48.5*TS,tx:67.5*TS,ty:48.5*TS,wait:60,color:"#10b981",border:"#065f46",bx1:(70-W)*TS,bx2:(75+1+W)*TS,by1:(43-W)*TS,by2:(47+1+W)*TS,tradesDone:0,tradeTimer:0,isTipNpc:true,tipUsed:false,isMarket:false},
+    {x:43.5*TS,y:36.5*TS,tx:43.5*TS,ty:36.5*TS,wait:60,color:"#8b5cf6",border:"#6d28d9",bx1:(39-W)*TS,bx2:(44+1+W)*TS,by1:(31-W)*TS,by2:(35+1+W)*TS,tradesDone:0,tradeTimer:0,isTipNpc:false,tipUsed:false,isMarket:false},
+    {x:11.5*TS,y:29.5*TS,tx:11.5*TS,ty:29.5*TS,wait:60,color:"#f59e0b",border:"#b45309",bx1:(5-W)*TS,bx2:(10+1+W)*TS,by1:(24-W)*TS,by2:(28+1+W)*TS,tradesDone:0,tradeTimer:0,isTipNpc:false,tipUsed:false,isMarket:false},
+    {x:57.5*TS,y:14.5*TS,tx:57.5*TS,ty:14.5*TS,wait:60,color:"#ef4444",border:"#b91c1c",bx1:(60-W)*TS,bx2:(65+1+W)*TS,by1:(9-W)*TS,by2:(13+1+W)*TS,tradesDone:0,tradeTimer:0,isTipNpc:false,tipUsed:false,isMarket:false},
+    {x:63.5*TS,y:43.5*TS,tx:63.5*TS,ty:43.5*TS,wait:60,color:"#10b981",border:"#065f46",bx1:(66-W)*TS,bx2:(71+1+W)*TS,by1:(38-W)*TS,by2:(42+1+W)*TS,tradesDone:0,tradeTimer:0,isTipNpc:true,tipUsed:false,isMarket:false},
   ]
   if(variant==="lessonInvest"){
-    // Port Trader (index 4) — stays near the dock on the north shore
+    // Port Trader (index 4), stays near the dock on the north shore
     npcs.push({x:LIV_PORT_X,y:LIV_PORT_Y,tx:LIV_PORT_X,ty:LIV_PORT_Y,wait:30,color:"#0d9488",border:"#0f766e",bx1:LIV_PORT_X-TS,bx2:LIV_PORT_X+TS,by1:LIV_PORT_Y-TS,by2:LIV_PORT_Y+TS,tradesDone:0,tradeTimer:0,isTipNpc:false,tipUsed:false,isMarket:false})
   }
   return npcs
@@ -528,45 +814,24 @@ function drawNpcs(ctx:CanvasRenderingContext2D,npcs:NpcState[],camX:number,camY:
   }
 }
 
-// ─── Governor (lesson 1) ──────────────────────────────────────────────────────
-interface GovState{x:number;y:number;tx:number;ty:number;wait:number;forcedTarget:{x:number;y:number}|null}
-function initGovernor():GovState{
-  const x=GOV_HOME_C*TS+TS/2,y=GOV_HOME_R*TS+TS/2
-  return{x,y,tx:x,ty:y,wait:90,forcedTarget:null}
-}
-function updateGovernor(gov:GovState){
-  if(gov.forcedTarget){
-    const dx=gov.forcedTarget.x-gov.x,dy=gov.forcedTarget.y-gov.y,dist=Math.sqrt(dx*dx+dy*dy)
-    if(dist>2){const spd=Math.min(GOV_SPEED*1.8,dist);gov.x+=dx/dist*spd;gov.y+=dy/dist*spd}
-    return
-  }
-  if(gov.wait>0){gov.wait--;return}
-  const dx=gov.tx-gov.x,dy=gov.ty-gov.y,dist=Math.sqrt(dx*dx+dy*dy)
-  if(dist<2){
-    gov.wait=120+Math.floor(Math.random()*180)
-    const cx=GOV_HOME_C*TS+TS/2,cy=GOV_HOME_R*TS+TS/2
-    for(let i=0;i<30;i++){
-      const rx=cx+(Math.random()*2-1)*GOV_WANDER,ry=cy+(Math.random()*2-1)*GOV_WANDER
-      if(!isBlocking(rx,ry)&&!isBlocking(rx+GOV_R,ry+GOV_R)&&!isBlocking(rx-GOV_R,ry-GOV_R)){gov.tx=rx;gov.ty=ry;break}
-    }
-  }else{const spd=Math.min(GOV_SPEED,dist);gov.x+=dx/dist*spd;gov.y+=dy/dist*spd}
-}
-function drawGovernor(ctx:CanvasRenderingContext2D,gov:GovState,camX:number,camY:number,highlighted:boolean){
-  const sx=Math.round(gov.x-camX),sy=Math.round(gov.y-camY)
-  ctx.fillStyle="rgba(0,0,0,0.28)";ctx.fillRect(sx-GOV_R+3,sy+GOV_R,GOV_R*2-3,5)
-  ctx.fillStyle="#f59e0b";ctx.fillRect(sx-GOV_R,sy-GOV_R,GOV_R*2,GOV_R*2)
-  ctx.fillStyle="rgba(255,255,255,0.35)";ctx.fillRect(sx-GOV_R+2,sy-GOV_R+2,GOV_R-2,GOV_R-2)
-  ctx.strokeStyle=highlighted?"#fde68a":"#92400e";ctx.lineWidth=highlighted?2.5:1.5
-  ctx.strokeRect(sx-GOV_R,sy-GOV_R,GOV_R*2,GOV_R*2)
-  ctx.fillStyle="#1a1200";ctx.font="bold 15px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
-  ctx.fillText("G",sx,sy)
-  ctx.fillStyle="rgba(0,0,0,0.65)";ctx.beginPath();ctx.roundRect(sx-42,sy-GOV_R-24,84,18,4);ctx.fill()
-  ctx.fillStyle="#fde68a";ctx.font="bold 11px sans-serif";ctx.fillText("The Governor",sx,sy-GOV_R-15)
+// ─── Tour stops (lesson 1) ─────────────────────────────────────────────────────
+// Small flavor props near spawn, not full BUILDING_DEFS structures — just a
+// square + label the player can walk up to and press [Z] to read the sign.
+function drawTourStop(ctx:CanvasRenderingContext2D,camX:number,camY:number,x:number,y:number,label:string,color:string,near:boolean){
+  const sx=Math.round(x-camX),sy=Math.round(y-camY),S=13
+  ctx.fillStyle="rgba(0,0,0,0.22)";ctx.fillRect(sx-S+2,sy+S,S*2-2,4)
+  ctx.fillStyle=color;ctx.fillRect(sx-S,sy-S,S*2,S*2)
+  ctx.fillStyle="rgba(255,255,255,0.35)";ctx.fillRect(sx-S+2,sy-S+2,S-2,S-2)
+  ctx.strokeStyle=near?"#fde68a":"rgba(0,0,0,0.35)";ctx.lineWidth=near?2.5:1.5
+  ctx.strokeRect(sx-S,sy-S,S*2,S*2)
+  ctx.fillStyle="rgba(0,0,0,0.65)";ctx.beginPath();ctx.roundRect(sx-38,sy-S-22,76,18,4);ctx.fill()
+  ctx.fillStyle="#fde68a";ctx.font="bold 10px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
+  ctx.fillText(label,sx,sy-S-13)
 }
 
 // ─── Bloo ─────────────────────────────────────────────────────────────────────
 interface BlooState{x:number;y:number;tx:number;ty:number;wait:number}
-function initBloo():BlooState{return{x:41*TS,y:22*TS,tx:41*TS,ty:22*TS,wait:30}}
+function initBloo():BlooState{return{x:41*TS,y:21*TS,tx:41*TS,ty:21*TS,wait:30}}
 function blooOnLand(wx:number,wy:number):boolean{
   const R=8
   return!isBlocking(wx+R,wy+R)&&!isBlocking(wx-R,wy+R)&&!isBlocking(wx+R,wy-R)&&!isBlocking(wx-R,wy-R)
@@ -580,10 +845,11 @@ function updateBloo(bloo:BlooState,variant:MapVariant,stage:number,px:number,py:
     }
     return
   }
-  let homeX=41*TS,homeY=22*TS
-  if(variant==="lesson1"&&stage>L1_HARVEST){homeX=(GOV_HOME_C+0.5)*TS;homeY=(GOV_HOME_R+2.5)*TS}
+  let homeX=41*TS,homeY=21*TS
+  if(variant==="lesson1"&&stage>=L1_SELL_INTRO){homeX=ENTRANCES[4].wx;homeY=ENTRANCES[4].wy-TS}
   if(variant==="lessonInvest"&&stage>=LIV_TRADE){homeX=LIV_PORT_X;homeY=LIV_PORT_Y+TS}
   if(variant==="lessonFarm"){homeX=(FARM_PLOT_C1+FARM_PLOT_C2)/2*TS;homeY=(FARM_PLOT_R1+FARM_PLOT_R2)/2*TS}
+  if(variant==="lessonFish"&&stage>=FISH_TO_PIER){homeX=FISH_PIER_X;homeY=FISH_PIER_Y+TS}
   if(bloo.wait>0){bloo.wait--;return}
   const dx=bloo.tx-bloo.x,dy=bloo.ty-bloo.y,dist=Math.sqrt(dx*dx+dy*dy)
   if(dist<2){
@@ -613,7 +879,7 @@ function drawBloo(ctx:CanvasRenderingContext2D,bloo:BlooState,camX:number,camY:n
 }
 
 // ─── Bink (lessonFarm) ────────────────────────────────────────────────────────
-// Fixed spot guarding the farm plot — no wandering, so he's always easy to find.
+// Fixed spot guarding the farm plot, no wandering, so he's always easy to find.
 function drawBink(ctx:CanvasRenderingContext2D,camX:number,camY:number,nearPlayer:boolean){
   const sx=Math.round(FARM_BINK_X-camX),sy=Math.round(FARM_BINK_Y-camY),S=11
   ctx.fillStyle="rgba(0,0,0,0.22)";ctx.fillRect(sx-S+2,sy+S,S*2-2,3)
@@ -626,72 +892,108 @@ function drawBink(ctx:CanvasRenderingContext2D,camX:number,camY:number,nearPlaye
   ctx.fillStyle="rgba(0,0,0,0.65)";ctx.beginPath();ctx.roundRect(sx-24,sy-S-22,48,17,3);ctx.fill()
   ctx.fillStyle="#e9d5ff";ctx.font="bold 9px sans-serif";ctx.fillText("Bink",sx,sy-S-13)
 }
-function drawFarmPlot(ctx:CanvasRenderingContext2D,camX:number,camY:number,digHits:boolean[],imgs:ImgMap){
-  const pathTile=imgs["path4"]
+// ─── Tallo (lessonFish) ───────────────────────────────────────────────────────
+// Fixed spot on the path to the Market, no wandering, so he's easy to find.
+function drawTallo(ctx:CanvasRenderingContext2D,camX:number,camY:number,nearPlayer:boolean){
+  const sx=Math.round(FISH_TALLO_X-camX),sy=Math.round(FISH_TALLO_Y-camY),S=11
+  ctx.fillStyle="rgba(0,0,0,0.22)";ctx.fillRect(sx-S+2,sy+S,S*2-2,3)
+  ctx.fillStyle="#0ea5e9";ctx.fillRect(sx-S,sy-S,S*2,S*2)
+  ctx.fillStyle="rgba(255,255,255,0.4)";ctx.fillRect(sx-S+1,sy-S+1,S-1,S-1)
+  ctx.strokeStyle=nearPlayer?"#bae6fd":"#0369a1";ctx.lineWidth=nearPlayer?2.5:1.5
+  ctx.strokeRect(sx-S,sy-S,S*2,S*2)
+  ctx.fillStyle="white";ctx.font="bold 12px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
+  ctx.fillText("Ta",sx,sy)
+  ctx.fillStyle="rgba(0,0,0,0.65)";ctx.beginPath();ctx.roundRect(sx-24,sy-S-22,48,17,3);ctx.fill()
+  ctx.fillStyle="#bae6fd";ctx.font="bold 9px sans-serif";ctx.fillText("Tallo",sx,sy-S-13)
+}
+// Weeds sprite = row 1, column 3 of the Outdoor_Decor_Free tileset (16px tiles).
+const WEEDS_SX=32, WEEDS_SY=0, WEEDS_SW=16, WEEDS_SH=16
+function drawFarmPlot(ctx:CanvasRenderingContext2D,camX:number,camY:number,rowsPlanted:boolean[],rowsHarvested:boolean[],plotUnlocked:boolean,imgs:ImgMap){
+  const weedsImg=imgs["outdoorDecor"]
   for(let r=FARM_PLOT_R1;r<=FARM_PLOT_R2;r++){
     for(let c=FARM_PLOT_C1;c<=FARM_PLOT_C2;c++){
       const sx=c*TS-camX, sy=r*TS-camY
-      if(pathTile){
-        blit(ctx,pathTile,sx,sy)
-        ctx.save(); ctx.globalAlpha=0.55; ctx.fillStyle=FARM_SOIL_TILE_COLOR
-        ctx.fillRect(sx,sy,TS,TS); ctx.restore()
-      }else{
-        ctx.fillStyle=FARM_SOIL_TILE_COLOR; ctx.fillRect(sx,sy,TS,TS)
+      ctx.fillStyle=FARM_SOIL_TILE_COLOR; ctx.fillRect(sx,sy,TS,TS)
+      const rowIdx=r-FARM_PLOT_R1
+      if(!plotUnlocked){
+        // Overgrown until the player buys weed-eating bugs at the Market.
+        if(weedsImg)ctx.drawImage(weedsImg,WEEDS_SX,WEEDS_SY,WEEDS_SW,WEEDS_SH,sx,sy,TS,TS)
+      }else if(rowsHarvested[rowIdx]){
+        ctx.fillStyle="#a16207";ctx.font="13px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
+        ctx.fillText("✅",sx+TS/2,sy+TS/2)
+      }else if(rowsPlanted[rowIdx]){
+        ctx.fillStyle="#22c55e";ctx.font="14px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
+        ctx.fillText("🌱",sx+TS/2,sy+TS/2)
       }
     }
   }
   const x=FARM_PLOT_C1*TS-camX, y=FARM_PLOT_R1*TS-camY
   const w=(FARM_PLOT_C2-FARM_PLOT_C1+1)*TS, h=(FARM_PLOT_R2-FARM_PLOT_R1+1)*TS
-  ctx.strokeStyle="#4a3118"; ctx.lineWidth=4; ctx.strokeRect(x,y,w,h)
-  for(let i=0;i<FARM_DIG_SPOTS.length;i++){
-    const d=FARM_DIG_SPOTS[i]
-    const dsx=d.wx-camX, dsy=d.wy-camY
-    ctx.beginPath(); ctx.arc(dsx,dsy,9,0,Math.PI*2)
-    ctx.fillStyle=digHits[i]?"#22c55e":"#3a2410"; ctx.fill()
-    if(digHits[i]){
-      ctx.fillStyle="#fff";ctx.font="bold 11px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
-      ctx.fillText("✓",dsx,dsy)
-    }
+  ctx.strokeStyle="#d2b48c"; ctx.lineWidth=4; ctx.strokeRect(x,y,w,h)
+  // Faint divider lines between rows, since planting works one row at a time.
+  ctx.strokeStyle="rgba(210,180,140,0.5)";ctx.lineWidth=1
+  for(let r=FARM_PLOT_R1+1;r<=FARM_PLOT_R2;r++){
+    const ry=r*TS-camY
+    ctx.beginPath();ctx.moveTo(x,ry);ctx.lineTo(x+w,ry);ctx.stroke()
   }
-}
-function drawBinkMachine(ctx:CanvasRenderingContext2D,camX:number,camY:number){
-  const sx=FARM_MACHINE_X-camX, sy=FARM_MACHINE_Y-camY, w=30,h=38
-  ctx.fillStyle="#f97316"; ctx.fillRect(sx-w/2,sy-h/2,w,h)
-  ctx.strokeStyle="#9a3412"; ctx.lineWidth=2.5; ctx.strokeRect(sx-w/2,sy-h/2,w,h)
-  ctx.fillStyle="#fff"; ctx.font="bold 14px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle"
-  ctx.fillText("💰",sx,sy)
 }
 
 // ─── Foliage ──────────────────────────────────────────────────────────────────
-interface FoliageNode{wx:number;wy:number;type:"tree"|"bush";hasFruit:boolean;regenTimer:number}
+type FoliageType="tree"|"bush"|"mushroom"|"wood"
+interface FoliageNode{wx:number;wy:number;type:FoliageType;hasFruit:boolean;regenTimer:number}
+// Shared per-type lookups so the ~10 duplicated harvest/collision call sites
+// (one per lesson variant) never have to repeat these ternaries themselves.
+function foliageHitR(type:FoliageType):number{
+  return type==="tree"?TREE_HIT_R:type==="bush"?BUSH_HIT_R:type==="mushroom"?MUSHROOM_HIT_R:WOOD_HIT_R
+}
+function foliageHitOY(type:FoliageType):number{
+  return type==="tree"?TREE_HIT_OY:type==="bush"?BUSH_HIT_OY:type==="mushroom"?MUSHROOM_HIT_OY:WOOD_HIT_OY
+}
+function foliageLabel(type:FoliageType):string{
+  return type==="tree"?"Tree":type==="bush"?"Bush":type==="mushroom"?"Mushroom":"Wood"
+}
+function foliageItemName(type:FoliageType):string{
+  return type==="tree"?"apples":type==="bush"?"berries":type==="mushroom"?"mushrooms":"wood"
+}
 function initFoliage():FoliageNode[]{
   const nodes:FoliageNode[]=[],MIN_GAP=2*TS
-  const tryPlace=(c:number,r:number,type:"tree"|"bush")=>{
+  const tryPlace=(c:number,r:number,type:FoliageType)=>{
     if(r<0||r>=MAP_H||c<0||c>=MAP_W)return
     if(MAP[r][c]!==GRASS)return
     const wx=(c+0.5)*TS,wy=(r+0.5)*TS
     if(nodes.some(n=>Math.hypot(n.wx-wx,n.wy-wy)<MIN_GAP))return
     nodes.push({wx,wy,type,hasFruit:true,regenTimer:0})
   }
-  tryPlace(22,17,"tree");tryPlace(24,18,"bush");tryPlace(21,20,"bush")
-  tryPlace(48,17,"tree");tryPlace(51,18,"tree");tryPlace(46,19,"bush");tryPlace(52,20,"bush")
-  tryPlace(22,25,"tree");tryPlace(25,26,"bush");tryPlace(23,27,"bush")
-  tryPlace(50,24,"tree");tryPlace(53,25,"bush");tryPlace(48,26,"bush");tryPlace(52,27,"tree")
-  tryPlace(23,31,"tree");tryPlace(26,33,"bush");tryPlace(22,34,"bush");tryPlace(25,36,"tree")
-  tryPlace(51,32,"tree");tryPlace(49,34,"bush");tryPlace(53,36,"tree");tryPlace(51,37,"bush")
-  tryPlace(34,39,"tree");tryPlace(38,41,"bush");tryPlace(33,41,"bush")
-  tryPlace(6,10,"tree");tryPlace(10,11,"bush");tryPlace(13,10,"bush")
-  tryPlace(4,21,"tree");tryPlace(11,20,"bush");tryPlace(7,22,"bush")
-  tryPlace(70,6,"tree");tryPlace(75,5,"tree");tryPlace(72,7,"bush");tryPlace(77,7,"bush")
-  tryPlace(68,16,"tree");tryPlace(76,15,"bush");tryPlace(74,17,"bush")
-  tryPlace(70,39,"tree");tryPlace(76,40,"tree");tryPlace(73,38,"bush");tryPlace(77,41,"bush")
-  tryPlace(70,50,"tree");tryPlace(75,51,"bush");tryPlace(72,52,"bush")
+  tryPlace(22,16,"tree");tryPlace(24,17,"bush");tryPlace(21,19,"bush");tryPlace(23,15,"mushroom")
+  tryPlace(48,16,"tree");tryPlace(51,17,"tree");tryPlace(46,18,"bush");tryPlace(52,19,"bush");tryPlace(49,15,"wood")
+  tryPlace(22,25,"tree");tryPlace(25,26,"bush");tryPlace(23,29,"bush");tryPlace(24,24,"mushroom")
+  tryPlace(50,23,"tree");tryPlace(53,25,"bush");tryPlace(48,26,"bush");tryPlace(52,29,"tree");tryPlace(51,22,"wood")
+  tryPlace(23,33,"tree");tryPlace(26,35,"bush");tryPlace(22,36,"bush");tryPlace(25,38,"tree");tryPlace(24,32,"mushroom")
+  tryPlace(51,34,"tree");tryPlace(49,36,"bush");tryPlace(53,38,"tree");tryPlace(51,39,"bush");tryPlace(50,33,"wood")
+  tryPlace(34,41,"tree");tryPlace(38,43,"bush");tryPlace(33,43,"bush");tryPlace(36,40,"mushroom")
+  tryPlace(6,20,"tree");tryPlace(10,21,"bush");tryPlace(13,20,"bush");tryPlace(8,19,"wood")
+  tryPlace(4,31,"tree");tryPlace(11,30,"bush");tryPlace(7,32,"bush");tryPlace(9,29,"mushroom")
+  tryPlace(60,6,"tree");tryPlace(65,5,"tree");tryPlace(62,7,"bush");tryPlace(67,7,"bush");tryPlace(63,5,"wood")
+  tryPlace(58,16,"tree");tryPlace(66,15,"bush");tryPlace(64,17,"bush");tryPlace(60,15,"mushroom")
+  tryPlace(66,34,"tree");tryPlace(72,35,"tree");tryPlace(69,33,"bush");tryPlace(73,36,"bush");tryPlace(70,32,"wood")
+  tryPlace(66,45,"tree");tryPlace(71,46,"bush");tryPlace(68,47,"bush");tryPlace(69,45,"mushroom")
   return nodes
 }
 function drawFoliage(ctx:CanvasRenderingContext2D,foliage:FoliageNode[],camX:number,camY:number,cw:number,ch:number,imgs:ImgMap,nearNode:FoliageNode|null){
   const sorted=[...foliage].sort((a,b)=>a.wy-b.wy)
   for(const n of sorted){
     const sx=Math.round(n.wx-camX),sy=Math.round(n.wy-camY)
+    if(n.type==="mushroom"||n.type==="wood"){
+      const DW=20,DH=20
+      if(sx+DW/2<0||sx-DW/2>cw||sy<-DH||sy>ch+DH)continue
+      if(n.hasFruit){
+        ctx.font="18px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
+        ctx.fillText(n.type==="mushroom"?"🍄":"🪵",sx,sy)
+      }else{
+        ctx.fillStyle="rgba(90,70,40,0.35)";ctx.beginPath();ctx.ellipse(sx,sy+4,9,4,0,0,Math.PI*2);ctx.fill()
+      }
+      continue
+    }
     const isTree=n.type==="tree",DW=isTree?TREE_DW:BUSH_DW,DH=isTree?TREE_DH:BUSH_DH
     if(sx+DW/2<0||sx-DW/2>cw||sy<-DH||sy>ch+DH)continue
     const imgKey=isTree?(n.hasFruit?"treeApples":"treeNoApples"):(n.hasFruit?"bushBerry":"bushNoBerry")
@@ -716,14 +1018,14 @@ function fbPath(ctx:CanvasRenderingContext2D,sx:number,sy:number){ctx.fillStyle=
 function tintGrassEdge(ctx:CanvasRenderingContext2D,sx:number,sy:number){
   ctx.save()
   ctx.globalCompositeOperation="multiply"
-  ctx.fillStyle="rgb(164,198,57)"
+  ctx.fillStyle="rgb(205,225,120)"
   ctx.fillRect(sx,sy,TS,TS)
   ctx.restore()
 }
 function tintPathEdge(ctx:CanvasRenderingContext2D,sx:number,sy:number){
   ctx.save()
   ctx.globalCompositeOperation="multiply"
-  ctx.fillStyle="rgb(201,180,133)"
+  ctx.fillStyle="rgb(226,215,190)"
   ctx.fillRect(sx,sy,TS,TS)
   ctx.restore()
 }
@@ -738,7 +1040,7 @@ function drawBuildings(ctx:CanvasRenderingContext2D,camX:number,camY:number,cw:n
       const ix=bx+(bw-dw)/2,iy=by+bh-dh
       ctx.save();ctx.beginPath();ctx.rect(bx,by,bw,bh);ctx.clip();ctx.drawImage(svgImg,ix,iy,dw,dh);ctx.restore()
     }
-    if(b.tile===B_MARKET){
+    {
       const fs=Math.min(13,TS*0.45)
       ctx.font=`bold ${fs}px sans-serif`;ctx.textAlign="center";ctx.textBaseline="middle"
       const cx2=bx+bw/2,lh=fs*1.4,labelY=by+bh+fs*0.9
@@ -750,125 +1052,127 @@ function drawBuildings(ctx:CanvasRenderingContext2D,camX:number,camY:number,cw:n
     }
   }
 }
-function drawMinimap(ctx:CanvasRenderingContext2D,px:number,py:number,cw:number){
-  const S=2.2,MW=Math.floor(MAP_W*S),MH=Math.floor(MAP_H*S),MX=cw-MW-12,MY=12
-  ctx.fillStyle="rgba(0,0,0,0.65)";ctx.fillRect(MX-3,MY-3,MW+6,MH+6)
-  for(let r=0;r<MAP_H;r++) for(let c=0;c<MAP_W;c++){
-    const t=MAP[r][c]
-    if(t===WATER) ctx.fillStyle="#1e6faa"
-    else if(t===PATH) ctx.fillStyle="#b89558"
-    else if(FLOWER_MAP[r]?.[c]) ctx.fillStyle="#7ab840"
-    else if(t>=B_INCOME){const d=BUILDING_DEFS.find(b=>b.tile===t);ctx.fillStyle=d?.color??"#888"}
-    else ctx.fillStyle="#3a7a20"
-    ctx.fillRect(MX+Math.floor(c*S),MY+Math.floor(r*S),Math.ceil(S),Math.ceil(S))
-  }
-  ctx.fillStyle="#ff6b35";ctx.beginPath();ctx.arc(MX+px/TS*S,MY+py/TS*S,3,0,Math.PI*2);ctx.fill()
-  ctx.strokeStyle="rgba(255,255,255,0.35)";ctx.lineWidth=1;ctx.strokeRect(MX,MY,MW,MH)
-}
-
 // ─── Top bar ──────────────────────────────────────────────────────────────────
-function drawTopBar(ctx:CanvasRenderingContext2D,cw:number,sustenance:number,inventory:Inventory,harvestCooldown:number,variant:MapVariant,gameStage:number,imgs:ImgMap){
+// Tabs shrink to fit narrow (phone/tablet) canvases; if they'd still be too
+// cramped to read even at the minimum width, they wrap onto a second row
+// instead of ever spilling past the canvas edge.
+function drawTopBar(ctx:CanvasRenderingContext2D,cw:number,sustenance:number,inventory:Inventory,harvestCooldown:number,variant:MapVariant,gameStage:number,imgs:ImgMap,bandLeft?:number,bandRight?:number){
   void imgs
   const isL1=variant==="lesson1"
-  const TAB_W=isL1?220:190, TAB_H=isL1?74:60, GAP=8, BAR_Y=8
-  const tabCount=isL1?3:2
-  const totalW=TAB_W*tabCount+GAP*(tabCount-1), startX=Math.round(cw/2-totalW/2)
-  const tabX=Array.from({length:tabCount},(_,i)=>startX+i*(TAB_W+GAP))
-  for(const tx of tabX){
-    ctx.fillStyle="#ffffff";ctx.beginPath();ctx.roundRect(tx,BAR_Y,TAB_W,TAB_H,14);ctx.fill()
-    ctx.strokeStyle="#bfdbfe";ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(tx,BAR_Y,TAB_W,TAB_H,14);ctx.stroke()
+  const baseTabW=isL1?220:190, baseTabH=isL1?74:60
+  const tabCount=2
+  const GAP=8, MARGIN=8, MIN_TAB_W=118, BAR_Y=8
+
+  // Confined to the band between the task sign (left) and the right edge
+  // so the bar never overlaps the task sign, it just narrows/wraps
+  // instead, the same way it already shrinks for narrow canvases.
+  const bL=bandLeft??MARGIN, bR=bandRight??(cw-MARGIN)
+  const avail=Math.max(0,bR-bL)
+  let perRow=tabCount
+  let tabW=Math.floor((avail-GAP*(tabCount-1))/tabCount)
+  if(tabW<MIN_TAB_W){
+    perRow=Math.max(1,Math.min(tabCount,Math.floor((avail+GAP)/(MIN_TAB_W+GAP))))
+    tabW=Math.floor((avail-GAP*(perRow-1))/perRow)
+  }
+  tabW=Math.max(90,Math.min(baseTabW,tabW))
+  const scale=Math.max(0.72,Math.min(1,tabW/baseTabW))
+  const tabH=Math.round(baseTabH*scale)
+  const fs=(n:number)=>Math.max(9,Math.round(n*scale))
+  const pad=Math.max(6,Math.round(10*scale))
+
+  const rowsCount=Math.ceil(tabCount/perRow)
+  const tabPos:{x:number,y:number}[]=[]
+  for(let row=0;row<rowsCount;row++){
+    const count=Math.min(perRow,tabCount-row*perRow)
+    const rowW=tabW*count+GAP*(count-1), rowStartX=Math.round(bL+(avail-rowW)/2)
+    const rowY=BAR_Y+row*(tabH+GAP)
+    for(let col=0;col<count;col++)tabPos.push({x:rowStartX+col*(tabW+GAP),y:rowY})
+  }
+  for(const{x,y}of tabPos){
+    ctx.fillStyle="#ffffff";ctx.beginPath();ctx.roundRect(x,y,tabW,tabH,14);ctx.fill()
+    ctx.strokeStyle="#bfdbfe";ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(x,y,tabW,tabH,14);ctx.stroke()
   }
   ctx.textBaseline="middle"
-  const pad=10
-  const LBL_Y=isL1?BAR_Y+13:BAR_Y+11
-  const BAR_TOP=isL1?BAR_Y+28:BAR_Y+22
-  const VAL_Y=isL1?BAR_Y+58:BAR_Y+40
-  const BAR_H=isL1?10:8
+  // FOOD is always tab 0, hand its screen rect back so a click/tap on it
+  // can be hit-tested against the food bar to trigger eating.
+  const foodRect={x:tabPos[0].x,y:tabPos[0].y,w:tabW,h:tabH}
 
   // FOOD tab
   {
-    const tx=tabX[0]
-    ctx.fillStyle="#1e40af";ctx.font="bold 11px sans-serif";ctx.textAlign="left"
+    const{x:tx,y:ty}=tabPos[0]
+    const LBL_Y=ty+(isL1?13:11)*scale, BAR_TOP=ty+(isL1?28:22)*scale, VAL_Y=ty+(isL1?58:40)*scale, BAR_H=Math.max(5,Math.round((isL1?10:8)*scale))
+    ctx.fillStyle="#1e40af";ctx.font=`bold ${fs(11)}px sans-serif`;ctx.textAlign="left"
     ctx.fillText("FOOD",tx+pad,LBL_Y)
     const onCD=harvestCooldown>0
     ctx.fillStyle=onCD?"rgba(0,0,0,0.3)":"rgba(0,0,0,0.5)"
-    ctx.font="11px sans-serif";ctx.textAlign="right"
-    ctx.fillText(onCD?`[Z] ${(harvestCooldown/60).toFixed(1)}s`:"[Z] Harvest",tx+TAB_W-pad,LBL_Y)
+    ctx.font=`${fs(11)}px sans-serif`;ctx.textAlign="right"
+    ctx.fillText(onCD?`[Z] ${(harvestCooldown/60).toFixed(1)}s`:"[Z] Harvest",tx+tabW-pad,LBL_Y)
     const pct=sustenance/SUSTENANCE_MAX
     const barColor=pct>0.5?"#4ade80":pct>0.25?"#facc15":pct>0.1?"#fb923c":"#f87171"
-    const barW=TAB_W-pad*2
+    const barW=tabW-pad*2
     ctx.fillStyle="rgba(0,0,0,0.1)";ctx.fillRect(tx+pad,BAR_TOP,barW,BAR_H)
     ctx.fillStyle=barColor;ctx.fillRect(tx+pad,BAR_TOP,Math.round(barW*pct),BAR_H)
     ctx.strokeStyle="rgba(0,0,0,0.15)";ctx.lineWidth=1;ctx.strokeRect(tx+pad,BAR_TOP,barW,BAR_H)
-    ctx.fillStyle="rgba(0,0,0,0.65)";ctx.font="11px sans-serif";ctx.textAlign="left"
+    ctx.fillStyle="rgba(0,0,0,0.65)";ctx.font=`${fs(11)}px sans-serif`;ctx.textAlign="left"
     ctx.fillText(`Energy: ${Math.ceil(sustenance)}%`,tx+pad,VAL_Y)
-    const bTxt=`${inventory.berries}  [X] Eat`
-    const bTxtW=ctx.measureText(bTxt).width,bISZ=14
-    const bImgX=tx+TAB_W-pad-bTxtW-bISZ-3
-    if(imgs["berry"]){ctx.drawImage(imgs["berry"],bImgX,VAL_Y-bISZ/2,bISZ,bISZ)}
-    ctx.fillStyle=inventory.berries>0?"#b45309":"rgba(0,0,0,0.3)"
-    ctx.font="11px sans-serif";ctx.fillText(bTxt,bImgX+bISZ+3,VAL_Y)
+    const eatTxt="[X] Eat"
+    const numFont=`${fs(11)}px sans-serif`
+    ctx.font=numFont
+    const eatW=ctx.measureText(eatTxt).width
+    ctx.textAlign="left"
+    ctx.fillStyle=(inventory.berries>0||inventory.apples>0)?"#1e293b":"rgba(0,0,0,0.3)"
+    ctx.fillText(eatTxt,tx+tabW-pad-eatW,VAL_Y)
   }
 
-  // COINS tab
+  // COINS tab: just an icon + count, no goal bar/progress text.
   {
-    const tx=tabX[1]
-    ctx.fillStyle="#1e40af";ctx.font="bold 11px sans-serif";ctx.textAlign="left"
-    ctx.fillText("COINS",tx+pad,LBL_Y)
-    if(isL1){
-      const prog=Math.min(1,inventory.coins/L1_COIN_GOAL)
-      const barW=TAB_W-pad*2
-      ctx.fillStyle="rgba(0,0,0,0.1)";ctx.fillRect(tx+pad,BAR_TOP,barW,BAR_H)
-      ctx.fillStyle="#facc15";ctx.fillRect(tx+pad,BAR_TOP,Math.round(barW*prog),BAR_H)
-      ctx.strokeStyle="rgba(0,0,0,0.15)";ctx.lineWidth=1;ctx.strokeRect(tx+pad,BAR_TOP,barW,BAR_H)
-      ctx.fillStyle="rgba(0,0,0,0.65)";ctx.font="11px sans-serif";ctx.textAlign="left"
-      ctx.fillText(`🪙 ${inventory.coins} / ${L1_COIN_GOAL}`,tx+pad,VAL_Y)
-      if(gameStage>=L1_SELLING){
-        ctx.fillStyle=inventory.coins>=L1_COIN_GOAL?"#16a34a":"rgba(0,0,0,0.35)";ctx.textAlign="right"
-        ctx.fillText(inventory.coins>=L1_COIN_GOAL?"Goal!":"Goal: 20",tx+TAB_W-pad,VAL_Y)
-      }
-    }else{
-      ctx.fillStyle="#1e293b";ctx.font="bold 22px sans-serif";ctx.textAlign="center"
-      ctx.fillText(`🪙 ${inventory.coins}`,tx+TAB_W/2,BAR_Y+38)
-    }
+    const{x:tx,y:ty}=tabPos[1]
+    const coinFont=`bold ${fs(22)}px sans-serif`,coinNum=String(inventory.coins),coinISZ=fs(22)
+    ctx.font=coinFont
+    const coinNumW=ctx.measureText(coinNum).width
+    const groupW=imgs["coin"]?coinISZ+6+coinNumW:coinNumW
+    let coinX=tx+tabW/2-groupW/2
+    if(imgs["coin"]){ctx.drawImage(imgs["coin"],coinX,ty+38*scale-coinISZ/2,coinISZ,coinISZ);coinX+=coinISZ+6}
+    ctx.fillStyle=inventory.coins<0?"#dc2626":"#1e293b";ctx.font=coinFont;ctx.textAlign="left"
+    ctx.fillText(coinNum,coinX,ty+38*scale)
   }
 
-  // ROADS tab (lesson 1 only)
-  if(isL1){
-    const tx=tabX[2]
-    ctx.fillStyle="#1e40af";ctx.font="bold 11px sans-serif";ctx.textAlign="left"
-    ctx.fillText("ROADS",tx+pad,LBL_Y)
-    ctx.fillStyle="#16a34a";ctx.beginPath();ctx.arc(tx+pad+6,BAR_Y+44,5,0,Math.PI*2);ctx.fill()
-    ctx.fillStyle="#16a34a";ctx.font="11px sans-serif";ctx.textBaseline="middle"
-    ctx.fillText("Roads Open",tx+pad+16,BAR_Y+44)
-    ctx.fillStyle="rgba(0,0,0,0.35)"
-    ctx.fillText("— Coming soon",tx+pad,VAL_Y)
-  }
+  return foodRect
 }
 
 // ─── Task sign ────────────────────────────────────────────────────────────────
-function drawTaskSign(ctx:CanvasRenderingContext2D,text:string,x:number,y:number,imgs?:ImgMap){
-  const TW=320,pad=10,lineH=16
+// Width shrinks on narrow canvases or when the minimap crowds it (rightLimit);
+// text always wraps onto extra lines, and the box grows taller to fit them,
+// staying pinned at (x,y), rather than ever widening into the minimap.
+function drawTaskSign(ctx:CanvasRenderingContext2D,text:string,x:number,y:number,cw:number,imgs?:ImgMap,rightLimit?:number){
+  const small=cw<520
+  const rLimit=rightLimit??(cw-x)
+  // Scales continuously with screen width instead of jumping between two
+  // fixed sizes, so the box keeps shrinking (and wrapping onto more lines)
+  // as the window gets narrower rather than stalling at one "small" size.
+  const TW=Math.max(140,Math.min(320,cw*0.55,rLimit-x))
+  const tiny=TW<190
+  const pad=tiny?6:small?8:10,lineH=tiny?13:small?14:16,fontPx=tiny?9:small?10:11
   const BERRY_TAG=":berry:"
   const hasBerry=text.startsWith(BERRY_TAG)
   const label=hasBerry?text.slice(BERRY_TAG.length):text
-  const iSz=hasBerry?16:0
+  const iSz=hasBerry?(small?14:16):0
   const textX=x+pad+(hasBerry?iSz+4:0)
   const maxW=TW-pad*2-(hasBerry?iSz+4:0)
-  ctx.font="bold 11px sans-serif"
+  ctx.font=`bold ${fontPx}px sans-serif`
   const words=label.split(" ")
   const lines:string[]=[]
   let cur=""
   for(const w of words){const t=cur?`${cur} ${w}`:w;if(ctx.measureText(t).width>maxW&&cur){lines.push(cur);cur=w}else cur=t}
   if(cur)lines.push(cur)
-  const TH=Math.max(58,32+lines.length*lineH+pad)
+  const TH=Math.max(tiny?42:small?50:58,32+lines.length*lineH+pad)
   ctx.fillStyle="#ffffff";ctx.beginPath();ctx.roundRect(x,y,TW,TH,14);ctx.fill()
   ctx.strokeStyle="#bfdbfe";ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(x,y,TW,TH,14);ctx.stroke()
-  ctx.fillStyle="#1e40af";ctx.font="bold 11px sans-serif";ctx.textAlign="left";ctx.textBaseline="middle"
+  ctx.fillStyle="#1e40af";ctx.font=`bold ${fontPx}px sans-serif`;ctx.textAlign="left";ctx.textBaseline="middle"
   ctx.fillText("TASK",x+pad,y+13)
   ctx.save()
   ctx.beginPath();ctx.rect(x,y+24,TW,TH-24);ctx.clip()
-  ctx.font="bold 11px sans-serif";ctx.fillStyle="#1e293b";ctx.textAlign="left";ctx.textBaseline="middle"
+  ctx.font=`bold ${fontPx}px sans-serif`;ctx.fillStyle="#1e293b";ctx.textAlign="left";ctx.textBaseline="middle"
   const startY=y+32+lineH/2
   lines.forEach((line,i)=>{
     const ly=startY+i*lineH
@@ -880,7 +1184,29 @@ function drawTaskSign(ctx:CanvasRenderingContext2D,text:string,x:number,y:number
 
 // ─── Sell menu (lesson 1) ─────────────────────────────────────────────────────
 interface SellMenuState{npcIdx:number;amount:number;phase:"select"|"result";resultLine:string;earnedCoins:number}
-function drawSellMenu(ctx:CanvasRenderingContext2D,cw:number,ch:number,npcName:string,npcColor:string,menu:SellMenuState,playerBerries:number,npcCanBuy:number,isTipNpc:boolean,tipUsed:boolean){
+interface ItemPrices{berry:number;apple:number;mushroom:number;wood:number}
+// Every lesson before lesson1's forage rework just sold everything at 1 coin
+// flat, so this default reproduces that exactly for lessonBudget/lessonLoans.
+const FLAT_SELL_PRICES:ItemPrices={berry:1,apple:1,mushroom:1,wood:1}
+// Lesson 1 teaches that different goods are worth different amounts.
+const L1_SELL_PRICES:ItemPrices={berry:1,apple:1,mushroom:3,wood:2}
+// Selling draws from a combined pool across all 4 goods, spending in a fixed
+// order (berries → apples → wood → mushrooms, saving the priciest for last)
+// so the amount-picker UI stays a single number instead of four sliders.
+function sellAllocation(amount:number,berries:number,apples:number,wood:number,mushrooms:number){
+  let rem=amount
+  const fromBerries=Math.min(rem,berries);rem-=fromBerries
+  const fromApples=Math.min(rem,apples);rem-=fromApples
+  const fromWood=Math.min(rem,wood);rem-=fromWood
+  const fromMushrooms=Math.min(rem,mushrooms);rem-=fromMushrooms
+  return{fromBerries,fromApples,fromWood,fromMushrooms}
+}
+function sellEarnings(alloc:{fromBerries:number;fromApples:number;fromWood:number;fromMushrooms:number},prices:ItemPrices){
+  return alloc.fromBerries*prices.berry+alloc.fromApples*prices.apple+alloc.fromWood*prices.wood+alloc.fromMushrooms*prices.mushroom
+}
+function combinedGoods(inv:Inventory):number{return inv.berries+inv.apples+inv.wood+inv.mushrooms}
+function drawSellMenu(ctx:CanvasRenderingContext2D,cw:number,ch:number,npcName:string,npcColor:string,menu:SellMenuState,playerBerries:number,playerApples:number,playerWood:number,playerMushrooms:number,npcCanBuy:number,isTipNpc:boolean,tipUsed:boolean,prices:ItemPrices=FLAT_SELL_PRICES){
+  const playerGoods=playerBerries+playerApples+playerWood+playerMushrooms
   ctx.fillStyle="rgba(0,0,0,0.65)";ctx.fillRect(0,0,cw,ch)
   const pw=Math.min(480,cw-40),ph=menu.phase==="result"?220:300
   const px=Math.round(cw/2-pw/2),py=Math.round(ch/2-ph/2)
@@ -894,8 +1220,8 @@ function drawSellMenu(ctx:CanvasRenderingContext2D,cw:number,ch:number,npcName:s
     ctx.fillStyle="#444";ctx.font="14px sans-serif";ctx.textAlign="left";ctx.textBaseline="middle"
     ctx.fillText(menu.resultLine,px+16,py+68)
     ctx.fillStyle="#16a34a";ctx.font="bold 18px sans-serif";ctx.textAlign="center"
-    ctx.fillText(`Sold ${menu.amount} 🍒 → 🪙 ${menu.earnedCoins}!`,cw/2,py+118)
-    if(isTipNpc&&menu.earnedCoins>menu.amount*L1_COIN_PER_BERRY){
+    ctx.fillText(`Sold ${menu.amount} item${menu.amount===1?"":"s"} → 🪙 ${menu.earnedCoins}!`,cw/2,py+118)
+    if(isTipNpc&&menu.earnedCoins>sellEarnings(sellAllocation(menu.amount,playerBerries,playerApples,playerWood,playerMushrooms),prices)){
       ctx.fillStyle="#ea580c";ctx.font="13px sans-serif"
       ctx.fillText("Keep the change! 🎉",cw/2,py+148)
     }
@@ -903,9 +1229,10 @@ function drawSellMenu(ctx:CanvasRenderingContext2D,cw:number,ch:number,npcName:s
     ctx.fillText("[Z] Done",cw/2,py+ph-20)
     return
   }
-  const maxSell=Math.min(playerBerries,npcCanBuy),canSell=menu.amount>0&&maxSell>0
+  const maxSell=Math.min(playerGoods,npcCanBuy),canSell=menu.amount>0&&maxSell>0
+  const alloc=sellAllocation(menu.amount,playerBerries,playerApples,playerWood,playerMushrooms)
   ctx.fillStyle="rgba(0,0,0,0.45)";ctx.font="13px sans-serif";ctx.textAlign="left";ctx.textBaseline="middle"
-  ctx.fillText("Berries to sell:",px+16,py+70)
+  ctx.fillText("Items to sell:",px+16,py+70)
   const scy=py+115,scx=cw/2
   ctx.fillStyle="rgba(0,0,0,0.06)";ctx.beginPath();ctx.roundRect(scx-90,scy-22,180,44,8);ctx.fill()
   ctx.textAlign="center";ctx.textBaseline="middle"
@@ -916,21 +1243,22 @@ function drawSellMenu(ctx:CanvasRenderingContext2D,cw:number,ch:number,npcName:s
   ctx.fillStyle=menu.amount>=maxSell?"rgba(0,0,0,0.15)":"rgba(0,0,0,0.6)"
   ctx.font="bold 20px sans-serif";ctx.fillText("▶",scx+60,scy)
   ctx.fillStyle="rgba(0,0,0,0.22)";ctx.font="10px sans-serif"
-  ctx.fillText("← → arrow keys",scx,scy+28)
+  const breakdown=[alloc.fromBerries&&`${alloc.fromBerries} 🍓`,alloc.fromApples&&`${alloc.fromApples} 🍎`,alloc.fromWood&&`${alloc.fromWood} 🪵`,alloc.fromMushrooms&&`${alloc.fromMushrooms} 🍄`].filter(Boolean).join(" + ")
+  ctx.fillText(canSell?`(${breakdown})`:"← → arrow keys",scx,scy+28)
   ctx.font="11px sans-serif";ctx.textBaseline="middle"
-  ctx.fillStyle=playerBerries>0?"rgba(0,0,0,0.45)":"#dc2626";ctx.textAlign="left"
-  ctx.fillText(`🍒 You have: ${playerBerries}`,px+16,py+168)
+  ctx.fillStyle=playerGoods>0?"rgba(0,0,0,0.45)":"#dc2626";ctx.textAlign="left"
+  ctx.fillText(`🍓${playerBerries} 🍎${playerApples} 🪵${playerWood} 🍄${playerMushrooms}`,px+16,py+168)
   ctx.fillStyle=npcCanBuy>0?"rgba(0,0,0,0.45)":"#dc2626";ctx.textAlign="right"
   ctx.fillText(`Limit: ${npcCanBuy}`,px+pw-16,py+168)
   ctx.strokeStyle="rgba(0,0,0,0.1)";ctx.lineWidth=1
   ctx.beginPath();ctx.moveTo(px+16,py+186);ctx.lineTo(px+pw-16,py+186);ctx.stroke()
   ctx.textAlign="center"
-  if(npcCanBuy<=0){ctx.fillStyle="#dc2626";ctx.font="bold 13px sans-serif";ctx.fillText("All stocked up for now — come back later!",cw/2,py+212)}
-  else if(playerBerries===0){ctx.fillStyle="#dc2626";ctx.font="bold 13px sans-serif";ctx.fillText("You have no berries to sell!",cw/2,py+212)}
+  if(npcCanBuy<=0){ctx.fillStyle="#dc2626";ctx.font="bold 13px sans-serif";ctx.fillText("All stocked up for now, come back later!",cw/2,py+212)}
+  else if(playerGoods===0){ctx.fillStyle="#dc2626";ctx.font="bold 13px sans-serif";ctx.fillText("You have nothing to sell!",cw/2,py+212)}
   else if(canSell){
-    let earnPreview=menu.amount*L1_COIN_PER_BERRY
+    let earnPreview=sellEarnings(alloc,prices)
     if(isTipNpc&&!tipUsed)earnPreview+=L1_TIP_COINS
-    const tipNote=isTipNpc&&!tipUsed?" — Keep the change! 🎉":""
+    const tipNote=isTipNpc&&!tipUsed?", Keep the change! 🎉":""
     ctx.fillStyle="#16a34a";ctx.font="bold 14px sans-serif"
     ctx.fillText(`You'll earn: 🪙 ${earnPreview}${tipNote}`,cw/2,py+212)
   }else{ctx.fillStyle="rgba(0,0,0,0.3)";ctx.font="13px sans-serif";ctx.fillText("Use ← → to choose an amount",cw/2,py+212)}
@@ -944,16 +1272,23 @@ function drawSellMenu(ctx:CanvasRenderingContext2D,cw:number,ch:number,npcName:s
 // ─── Notification banner ──────────────────────────────────────────────────────
 function drawNotifBanner(ctx:CanvasRenderingContext2D,cw:number,ch:number,text:string,alpha:number){
   ctx.save();ctx.globalAlpha=alpha
-  ctx.font="bold 14px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
-  const tw=ctx.measureText(text).width+32,bx=cw/2-tw/2,by=ch/2-110
-  ctx.fillStyle="#1a3a0a";ctx.beginPath();ctx.roundRect(bx,by,tw,38,6);ctx.fill()
-  ctx.strokeStyle="#4ade80";ctx.lineWidth=1.5;ctx.beginPath();ctx.roundRect(bx,by,tw,38,6);ctx.stroke()
-  ctx.fillStyle="#86efac";ctx.fillText(text,cw/2,by+19)
+  const small=cw<520
+  ctx.font=`bold ${small?12:14}px sans-serif`;ctx.textAlign="center";ctx.textBaseline="middle"
+  const maxW=cw-32
+  const lines=ctx.measureText(text).width<=maxW?[text]:wrapCanvasText(ctx,text,maxW)
+  const tw=Math.min(maxW+32,Math.max(...lines.map(l=>ctx.measureText(l).width))+32)
+  const lineH=small?18:20,bh=lineH*lines.length+18
+  const bx=cw/2-tw/2,by=ch/2-110
+  ctx.fillStyle="#1a3a0a";ctx.beginPath();ctx.roundRect(bx,by,tw,bh,6);ctx.fill()
+  ctx.strokeStyle="#4ade80";ctx.lineWidth=1.5;ctx.beginPath();ctx.roundRect(bx,by,tw,bh,6);ctx.stroke()
+  ctx.fillStyle="#86efac"
+  const startY=by+bh/2-((lines.length-1)*lineH)/2
+  lines.forEach((line,i)=>ctx.fillText(line,cw/2,startY+i*lineH))
   ctx.restore()
 }
 
 // ─── Day-over overlay ─────────────────────────────────────────────────────────
-function drawDrops(ctx:CanvasRenderingContext2D,drops:{wx:number;wy:number;berries:number;coins:number}[],camX:number,camY:number){
+function drawDrops(ctx:CanvasRenderingContext2D,drops:{wx:number;wy:number;berries:number;apples:number;coins:number}[],camX:number,camY:number){
   for(const d of drops){
     const sx=Math.round(d.wx-camX),sy=Math.round(d.wy-camY)
     // pulsing glow
@@ -962,7 +1297,8 @@ function drawDrops(ctx:CanvasRenderingContext2D,drops:{wx:number;wy:number;berri
     ctx.fillStyle="#92400e";ctx.font="bold 8px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
     ctx.fillText("!",sx,sy)
     const parts:string[]=[]
-    if(d.berries>0)parts.push(`🍒${d.berries}`)
+    if(d.berries>0)parts.push(`🍓${d.berries}`)
+    if(d.apples>0)parts.push(`🍎${d.apples}`)
     if(d.coins>0)parts.push(`🪙${d.coins}`)
     if(parts.length===0)return
     const label=parts.join(" ")
@@ -973,30 +1309,37 @@ function drawDrops(ctx:CanvasRenderingContext2D,drops:{wx:number;wy:number;berri
   }
 }
 
-function drawDayOver(ctx:CanvasRenderingContext2D,cw:number,ch:number,dropped:{berries:number;coins:number},lost:{berries:number;coins:number}){
+function drawDayOver(ctx:CanvasRenderingContext2D,cw:number,ch:number,dropped:{berries:number;apples:number;coins:number},lost:{berries:number;apples:number;coins:number}){
   ctx.fillStyle="rgba(0,0,0,0.72)";ctx.fillRect(0,0,cw,ch)
   const pw=400,ph=280,px=Math.round(cw/2-pw/2),py=Math.round(ch/2-ph/2)
   ctx.fillStyle="#ffffff";ctx.beginPath();ctx.roundRect(px,py,pw,ph,16);ctx.fill()
   ctx.strokeStyle="#6366f1";ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(px,py,pw,ph,16);ctx.stroke()
   ctx.textAlign="center";ctx.textBaseline="middle"
-  ctx.fillStyle="#dc2626";ctx.font="bold 34px sans-serif";ctx.fillText("💀 You Passed Out!",cw/2,py+50)
-  ctx.fillStyle="#4b5563";ctx.font="14px sans-serif";ctx.fillText("Your sustenance ran out.",cw/2,py+88)
-  const hasDrops=dropped.berries>0||dropped.coins>0
-  const hasLost=lost.berries>0||lost.coins>0
-  if(hasDrops){
-    const dp:string[]=[]
-    if(dropped.berries>0)dp.push(`🍒 ${dropped.berries} berr${dropped.berries===1?"y":"ies"}`)
-    if(dropped.coins>0)dp.push(`🪙 ${dropped.coins} coin${dropped.coins===1?"":"s"}`)
-    ctx.fillStyle="#d97706";ctx.font="bold 14px sans-serif";ctx.fillText("Items dropped nearby (go pick them up!):",cw/2,py+122)
-    ctx.fillStyle="#1e293b";ctx.font="14px sans-serif";ctx.fillText(dp.join("  "),cw/2,py+144)
-  }
+  void dropped
+  const hasLost=lost.berries>0||lost.apples>0||lost.coins>0
+
+  // Stack of rows, vertically centered as a whole group within the card
+  // (rather than each row pinned to a fixed y), so title/subtitle sit
+  // lower and "Press R" sits higher when there's less content to show.
+  const TITLE_H=40,GAP1=22,SUB_H=20,GAP2=hasLost?46:70,LOST_H=hasLost?34:0,GAP3=hasLost?40:0,PRESS_H=18
+  const totalH=TITLE_H+GAP1+SUB_H+GAP2+LOST_H+GAP3+PRESS_H
+  let y=py+(ph-totalH)/2+TITLE_H/2
+
+  ctx.fillStyle="#dc2626";ctx.font="bold 34px sans-serif";ctx.fillText("💀 You Starved!",cw/2,y)
+  y+=TITLE_H/2+GAP1+SUB_H/2
+  ctx.fillStyle="#4b5563";ctx.font="14px sans-serif";ctx.fillText("You ran out of food, which caused you to lose a few coins.",cw/2,y)
+  y+=SUB_H/2+GAP2
   if(hasLost){
+    y+=LOST_H/2
     const lp:string[]=[]
-    if(lost.berries>0)lp.push(`🍒 ${lost.berries}`)
+    if(lost.berries>0)lp.push(`🍓 ${lost.berries}`)
+    if(lost.apples>0)lp.push(`🍎 ${lost.apples}`)
     if(lost.coins>0)lp.push(`🪙 ${lost.coins}`)
-    ctx.fillStyle="#dc2626";ctx.font="13px sans-serif";ctx.fillText(`Lost forever: ${lp.join("  ")}`,cw/2,py+172)
+    ctx.fillStyle="#dc2626";ctx.font="bold 26px sans-serif";ctx.fillText(`Lost: ${lp.join("  ")}`,cw/2,y)
+    y+=LOST_H/2+GAP3
   }
-  ctx.fillStyle="#94a3b8";ctx.font="13px sans-serif";ctx.fillText("Press [R] to respawn",cw/2,py+240)
+  y+=PRESS_H/2
+  ctx.fillStyle="#94a3b8";ctx.font="13px sans-serif";ctx.fillText("Press [R] or tap to respawn",cw/2,y)
 }
 
 // ─── House-for-sale menu (lessonBudget) ───────────────────────────────────────
@@ -1008,7 +1351,7 @@ function drawHouseSaleMenu(ctx:CanvasRenderingContext2D,cw:number,ch:number,buil
   ctx.fillStyle="#ffffff";ctx.beginPath();ctx.roundRect(px,py,pw,ph,16);ctx.fill()
   ctx.strokeStyle=b.color;ctx.lineWidth=3;ctx.beginPath();ctx.roundRect(px,py,pw,ph,16);ctx.stroke()
   ctx.fillStyle=b.color;ctx.font="bold 16px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
-  ctx.fillText(`${b.label.join(" ")} — For Sale`,cw/2,py+24)
+  ctx.fillText(`${b.label.join(" ")}: For Sale`,cw/2,py+24)
   ctx.strokeStyle=`${b.color}55`;ctx.lineWidth=1
   ctx.beginPath();ctx.moveTo(px+16,py+40);ctx.lineTo(px+pw-16,py+40);ctx.stroke()
   ctx.fillStyle="#1e293b";ctx.font="bold 30px sans-serif"
@@ -1019,7 +1362,7 @@ function drawHouseSaleMenu(ctx:CanvasRenderingContext2D,cw:number,ch:number,buil
   ctx.beginPath();ctx.moveTo(px+16,py+130);ctx.lineTo(px+pw-16,py+130);ctx.stroke()
   const canAfford=coins>=price
   ctx.fillStyle=canAfford?"#16a34a":"#dc2626";ctx.font="bold 14px sans-serif"
-  ctx.fillText(canAfford?`✅ You can afford this!`:`❌ You only have ${coins} coins — can't afford it!`,cw/2,py+158)
+  ctx.fillText(canAfford?`✅ You can afford this!`:`❌ You only have ${coins} coins, can't afford it!`,cw/2,py+158)
   if(!canAfford){ctx.fillStyle="#6b7280";ctx.font="12px sans-serif";ctx.fillText(`You need ${price-coins} more coins.`,cw/2,py+180)}
   ctx.fillStyle="#94a3b8";ctx.font="11px sans-serif"
   ctx.fillText("[Z] or [X] Close",cw/2,py+ph-16)
@@ -1028,17 +1371,17 @@ function drawHouseSaleMenu(ctx:CanvasRenderingContext2D,cw:number,ch:number,buil
 // ─── Invest: trade menu ───────────────────────────────────────────────────────
 const LIV_TRADE_DEFS=[
   {emoji:"🍞",name:"Bread", cost:LIV_BREAD_COST,desc:"Eat [X] to fully restore energy"},
-  {emoji:"🌱",name:"Seeds", cost:LIV_SEED_COST, desc:`Sprout in 15s — get ${LIV_SEED_BERRY_YIELD} berries each!`},
-  {emoji:"🪵",name:"Wood",  cost:LIV_WOOD_COST, desc:`Walk to the Market — sell for ${LIV_WOOD_COINS} coins each`},
+  {emoji:"🌱",name:"Seeds", cost:LIV_SEED_COST, desc:`Sprout in 15s, get ${LIV_SEED_BERRY_YIELD} berries each!`},
+  {emoji:"🪵",name:"Wood",  cost:LIV_WOOD_COST, desc:`Walk to the Market, sell for ${LIV_WOOD_COINS} coins each`},
 ]
-function drawLivTradeMenu(ctx:CanvasRenderingContext2D,cw:number,ch:number,berries:number,idx:number,bread:number,seeds:number,wood:number){
+function drawLivTradeMenu(ctx:CanvasRenderingContext2D,cw:number,ch:number,berries:number,idx:number,bread:number,seeds:number,wood:number,imgs:ImgMap){
   ctx.fillStyle="rgba(0,0,0,0.65)";ctx.fillRect(0,0,cw,ch)
   const pw=Math.min(520,cw-40),ph=316
   const px=Math.round(cw/2-pw/2),py=Math.round(ch/2-ph/2)
   ctx.fillStyle="#ffffff";ctx.beginPath();ctx.roundRect(px,py,pw,ph,16);ctx.fill()
   ctx.strokeStyle="#0d9488";ctx.lineWidth=3;ctx.beginPath();ctx.roundRect(px,py,pw,ph,16);ctx.stroke()
   ctx.fillStyle="#0d9488";ctx.font="bold 15px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
-  ctx.fillText("⚓ Port Trader — Import Goods",cw/2,py+22)
+  ctx.fillText("⚓ Port Trader: Import Goods",cw/2,py+22)
   ctx.strokeStyle="rgba(0,0,0,0.1)";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(px+16,py+38);ctx.lineTo(px+pw-16,py+38);ctx.stroke()
   ctx.fillStyle="#64748b";ctx.font="12px sans-serif"
   ctx.fillText("↑↓ to select   [Z] to buy   [X] to close",cw/2,py+52)
@@ -1051,8 +1394,9 @@ function drawLivTradeMenu(ctx:CanvasRenderingContext2D,cw:number,ch:number,berri
       ctx.beginPath();ctx.roundRect(px+12,iy,pw-24,68,10);ctx.fill()
       ctx.strokeStyle=canAfford?"#0d9488":"#dc2626";ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(px+12,iy,pw-24,68,10);ctx.stroke()
     }
-    ctx.font="26px sans-serif";ctx.textAlign="left";ctx.textBaseline="middle"
-    ctx.fillText(it.emoji,px+26,iy+34)
+    ctx.textAlign="left";ctx.textBaseline="middle"
+    if(i===0&&imgs["bread"])ctx.drawImage(imgs["bread"],px+13,iy+34-13,26,26)
+    else{ctx.font="26px sans-serif";ctx.fillText(it.emoji,px+26,iy+34)}
     ctx.fillStyle="#1e293b";ctx.font="bold 14px sans-serif"
     ctx.fillText(it.name,px+64,iy+20)
     ctx.fillStyle=canAfford?"#047857":"#dc2626";ctx.font="13px sans-serif"
@@ -1068,22 +1412,25 @@ function drawLivTradeMenu(ctx:CanvasRenderingContext2D,cw:number,ch:number,berri
   ctx.fillStyle="#94a3b8";ctx.font="11px sans-serif";ctx.textAlign="center"
   ctx.fillText(`Your berries: ${berries}`,cw/2,py+ph-16)
 }
-function drawLivInventory(ctx:CanvasRenderingContext2D,x:number,y:number,bread:number,seeds:number,wood:number,seedTimer:number){
+function drawLivInventory(ctx:CanvasRenderingContext2D,x:number,y:number,bread:number,seeds:number,wood:number,seedTimer:number,imgs:ImgMap){
   const parts:string[]=[]
-  if(bread>0)parts.push(`🍞×${bread}`)
+  const hasBread=bread>0&&!!imgs["bread"]
+  if(bread>0)parts.push(hasBread?`×${bread}`:`🍞×${bread}`)
   if(seeds>0)parts.push(`🌱×${seeds}${seedTimer>0?` (${Math.ceil(seedTimer/60)}s)`:""}`)
   if(wood>0)parts.push(`🪵×${wood}`)
   if(parts.length===0)return
   const text=parts.join("  ")
   ctx.font="bold 12px sans-serif";ctx.textAlign="left";ctx.textBaseline="middle"
-  const tw=ctx.measureText(text).width+8
+  const iSz=14,iconPad=hasBread?iSz+2:0
+  const tw=ctx.measureText(text).width+8+iconPad
   ctx.fillStyle="rgba(255,255,255,0.92)";ctx.beginPath();ctx.roundRect(x,y,tw+16,26,8);ctx.fill()
   ctx.strokeStyle="#0d9488";ctx.lineWidth=1.5;ctx.beginPath();ctx.roundRect(x,y,tw+16,26,8);ctx.stroke()
-  ctx.fillStyle="#0f172a";ctx.fillText(text,x+8,y+13)
+  if(hasBread)ctx.drawImage(imgs["bread"],x+8,y+13-iSz/2,iSz,iSz)
+  ctx.fillStyle="#0f172a";ctx.fillText(text,x+8+iconPad,y+13)
 }
 
 // ─── Invest: port dock ────────────────────────────────────────────────────────
-function drawPortDock(ctx:CanvasRenderingContext2D,camX:number,camY:number){
+function drawPortDock(ctx:CanvasRenderingContext2D,camX:number,camY:number,signLabel="⚓ PORT"){
   const px1=(LIV_PORT_C-1)*TS-camX, px2=(LIV_PORT_C+2)*TS-camX   // 3 tiles wide
   const py1=12*TS-camY, py2=(LIV_PORT_R+1)*TS-camY
   ctx.fillStyle="#7a5030"; ctx.fillRect(px1,py1,px2-px1,py2-py1)
@@ -1093,12 +1440,22 @@ function drawPortDock(ctx:CanvasRenderingContext2D,camX:number,camY:number){
   // bollards
   ctx.fillStyle="#3a2010"
   for(const bx of [px1+8,px2-8]) for(const by of [py1+10,py1+50,py1+90]){ctx.beginPath();ctx.arc(bx,by,5,0,Math.PI*2);ctx.fill()}
-  // PORT sign above the trader
+  // sign above the trader
   const signCx=(LIV_PORT_C+0.5)*TS-camX, signY=(LIV_PORT_R-1)*TS-camY-8
-  ctx.fillStyle="#e8d5a0"; ctx.beginPath(); ctx.roundRect(signCx-28,signY,56,22,4); ctx.fill()
-  ctx.strokeStyle="#b8952a"; ctx.lineWidth=1.5; ctx.beginPath(); ctx.roundRect(signCx-28,signY,56,22,4); ctx.stroke()
-  ctx.fillStyle="#7a4a00"; ctx.font="bold 10px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle"
-  ctx.fillText("⚓ PORT",signCx,signY+11)
+  ctx.font="bold 10px sans-serif"
+  const signW=Math.max(56,ctx.measureText(signLabel).width+16)
+  ctx.fillStyle="#e8d5a0"; ctx.beginPath(); ctx.roundRect(signCx-signW/2,signY,signW,22,4); ctx.fill()
+  ctx.strokeStyle="#b8952a"; ctx.lineWidth=1.5; ctx.beginPath(); ctx.roundRect(signCx-signW/2,signY,signW,22,4); ctx.stroke()
+  ctx.fillStyle="#7a4a00"; ctx.textAlign="center"; ctx.textBaseline="middle"
+  ctx.fillText(signLabel,signCx,signY+11)
+}
+// Small icon by the pier showing whatever gear the player currently has,
+// the story's "map updates with a gear icon" beat.
+function drawFishGearIcon(ctx:CanvasRenderingContext2D,camX:number,camY:number,ownsRod:boolean,rodBorrowed:boolean){
+  if(!ownsRod&&!rodBorrowed)return
+  const sx=FISH_PIER_X-camX+30, sy=FISH_PIER_Y-camY-40
+  ctx.font="20px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
+  ctx.fillText(ownsRod?"🎣":"🤝",sx,sy)
 }
 
 // ─── Invest: trade vessel ─────────────────────────────────────────────────────
@@ -1126,15 +1483,22 @@ function drawInvestBoat(ctx:CanvasRenderingContext2D,bx:number,by:number,frame:n
 
 // ─── Bottom prompt helper ─────────────────────────────────────────────────────
 function drawPrompt(ctx:CanvasRenderingContext2D,cw:number,ch:number,msg:string,color:string){
-  ctx.font="bold 13px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
-  const tw=ctx.measureText(msg).width,bx=cw/2-tw/2-12,by=ch-58
-  ctx.fillStyle="#ffffff";ctx.beginPath();ctx.roundRect(bx,by,tw+24,28,14);ctx.fill()
-  ctx.strokeStyle="#bfdbfe";ctx.lineWidth=1.5;ctx.beginPath();ctx.roundRect(bx,by,tw+24,28,14);ctx.stroke()
-  ctx.fillStyle=color;ctx.fillText(msg,cw/2,by+14)
+  const small=cw<520
+  ctx.font=`bold ${small?11:13}px sans-serif`;ctx.textAlign="center";ctx.textBaseline="middle"
+  const maxW=cw-56
+  const lines=ctx.measureText(msg).width<=maxW?[msg]:wrapCanvasText(ctx,msg,maxW)
+  const tw=Math.min(maxW,Math.max(...lines.map(l=>ctx.measureText(l).width)))
+  const lineH=small?15:17,bh=lineH*lines.length+11
+  const bx=cw/2-tw/2-12,by=ch-28-bh
+  ctx.fillStyle="#ffffff";ctx.beginPath();ctx.roundRect(bx,by,tw+24,bh,14);ctx.fill()
+  ctx.strokeStyle="#bfdbfe";ctx.lineWidth=1.5;ctx.beginPath();ctx.roundRect(bx,by,tw+24,bh,14);ctx.stroke()
+  ctx.fillStyle=color
+  const startY=by+bh/2-((lines.length-1)*lineH)/2
+  lines.forEach((line,i)=>ctx.fillText(line,cw/2,startY+i*lineH))
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", paused = false }: { variant: MapVariant; initialCoins?: number; playerColor?: string; paused?: boolean }) {
+export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", paused = false, freeplay = false }: { variant: MapVariant; initialCoins?: number; playerColor?: string; paused?: boolean; freeplay?: boolean }) {
   const canvasRef=useRef<HTMLCanvasElement>(null)
   const router=useRouter()
   const completeRef=useRef<(()=>void)|null>(null)
@@ -1142,8 +1506,21 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
   const [finalCoins, setFinalCoins]=useState(0)
   const [showOverlay, setShowOverlay]=useState(false)
   const [overlayOpacity, setOverlayOpacity]=useState(0)
+  // Lesson Farm's seed-buying and Lesson Fish's rod decision use a Market
+  // popup / StoryScroll overlay that pauses the canvas game underneath, same
+  // as the `paused` prop. The `*Ref` mirrors let the rAF loop (mounted once,
+  // below) read the latest value each frame without needing to restart the effect.
+  const [marketOpen, setMarketOpen]=useState(false)
+  const marketOpenRef=useRef(marketOpen)
+  useEffect(()=>{marketOpenRef.current=marketOpen},[marketOpen])
+  // Lesson Fish's rod decision (buy vs borrow) is a real money commitment,
+  // so it gets the official StoryScroll treatment.
+  const [fishScroll, setFishScrollKind]=useState<"rod"|null>(null)
+  const fishScrollRef=useRef(fishScroll)
+  useEffect(()=>{fishScrollRef.current=fishScroll},[fishScroll])
+  const [, setUiTick]=useState(0) // bump after Market/scroll purchases so displayed coins/seeds refresh
   const pausedRef=useRef(paused)
-  useEffect(()=>{pausedRef.current=paused},[paused])
+  useEffect(()=>{pausedRef.current=paused||marketOpen||fishScroll!==null},[paused,marketOpen,fishScroll])
 
   function triggerFadeOut(then: ()=>void){
     setTimeout(()=>{
@@ -1153,13 +1530,19 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
     }, 3000)
   }
 
-  const stageComplete=variant==="lesson1"?L1_COMPLETE:variant==="lessonBudget"?LB_COMPLETE:variant==="lessonLoans"?LL_COMPLETE:variant==="lessonInvest"?LIV_COMPLETE:FARM_COMPLETE
+  const stageComplete=variant==="lesson1"?L1_COMPLETE:variant==="lessonBudget"?LB_COMPLETE:variant==="lessonLoans"?LL_COMPLETE:variant==="lessonInvest"?LIV_COMPLETE:variant==="lessonFish"?FISH_COMPLETE:FARM_COMPLETE
 
   const stateRef=useRef({
-    px: 38*TS, py: 22*TS,
+    px: 38*TS, py: 21*TS,
     keys: new Set<string>(),
     pointerDown: false as boolean,
     pointerWX: 0 as number, pointerWY: 0 as number,
+    pointerTapPending: false as boolean,
+    foodBarRect: null as {x:number,y:number,w:number,h:number}|null,
+    foodTapPending: false as boolean,
+    inventoryPanelRect: null as {x:number,y:number}|null,
+    invDragFromIndex: null as number|null,
+    invDragPointerX: 0 as number, invDragPointerY: 0 as number,
     frame: 0, raf: 0,
     imgs: null as ImgMap|null,
     npcs: initNpcs(variant),
@@ -1168,18 +1551,23 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
     dayOver: false,
     harvestCooldown: 0,
     bloo: initBloo(),
-    gameStage: 0 as number,
+    // Freeplay ("Play" from the sidebar) drops the player in past the story
+    // stages, no forced intro dialogue/task sign, so the whole world they
+    // already unlocked is open to just wander and use, no instructions.
+    gameStage: (freeplay?stageComplete:0) as number,
     dialogIdx: 0 as number,
+    typeText: "" as string,
+    typeChars: 0 as number,
+    blooLastLine: "" as string,
+    blooRecapOpen: false as boolean,
     completionCalled: false,
     foliage: initFoliage(),
+    logs: initLogs(initFoliage()),
     notifText: "" as string,
     notifTimer: 0 as number,
     // lesson 1 fields
-    gov: initGovernor(),
     blooRemindIdx: 0 as number,
     blooHarvestDismissed: false as boolean,
-    govArrived: false as boolean,
-    govTaxAmount: 0 as number,
     sellMenu: null as SellMenuState|null,
     // lesson budget fields
     houseSaleOpen: false as boolean,
@@ -1197,21 +1585,70 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
     houseSaleIdx: -1 as number,
     homeViewed: false as boolean,
     ownedHouseIdx: -1 as number,
-    drops: [] as {wx:number;wy:number;berries:number;coins:number}[],
-    deathDropped: {berries:0,coins:0},
-    deathLost: {berries:0,coins:0},
+    drops: [] as {wx:number;wy:number;berries:number;apples:number;coins:number}[],
+    deathDropped: {berries:0,apples:0,coins:0},
+    deathLost: {berries:0,apples:0,coins:0},
     sprintTimer: 0 as number,
     // lesson farm fields
     binkDialogIdx: 0 as number,
     farmChoiceIdx: 0 as number,
-    farmChosenId: null as Phase1ChoiceID|null,
-    farmDigHits: [false,false,false] as boolean[],
+    farmChosenRoute: null as "bugs"|"weeder"|null,
     farmState: createInitialFarmPlotState(),
     farmRevealIdx: 0 as number,
+    farmSeedsPitchIdx: 0 as number,
+    farmWrapIdx: 0 as number,
+    // lesson fish fields
+    talloDialogIdx: 0 as number,
+    fishOwnsRod: false as boolean,
+    fishRodBorrowed: false as boolean,
+    fishRodSnapped: false as boolean,
+    fishBaitCans: 0 as number,
+    fishCastsDone: 0 as number,
+    fishWrapIdx: 0 as number,
   })
+
+  // ─── Lesson Farm: StoryScroll / Market handlers ────────────────────────────
+  // These run as normal React event handlers (not inside the rAF loop), so
+  // they can freely mutate stateRef.current and call setState.
+  function handleBuySeedPack(){
+    const s=stateRef.current
+    const{state,coinsDelta,success}=buySeedPack(s.farmState,s.inventory.coins)
+    s.farmState=state;s.inventory.coins+=coinsDelta
+    if(success&&s.farmState.seedsOwned>=SEEDS_NEEDED){setMarketOpen(false);s.gameStage=FARM_PLANTING}
+    setUiTick(t=>t+1)
+  }
+  function handleBuyBread(){
+    const s=stateRef.current
+    if(s.inventory.coins>=FARM_BREAD_COST){s.inventory.coins-=FARM_BREAD_COST;s.sustenance=SUSTENANCE_MAX}
+    setUiTick(t=>t+1)
+  }
+
+  // ─── Lesson Fish: StoryScroll handler ──────────────────────────────────────
+  function handleFishScrollChoice(choiceId:string){
+    const s=stateRef.current
+    if(choiceId==="buy"){
+      if(s.inventory.coins<FISH_ROD_COST){
+        s.notifText=`Not enough coins for the rod, try selling some fish or berries first!`;s.notifTimer=240
+        return // leave the scroll open so they can pick borrow instead
+      }
+      s.inventory.coins-=FISH_ROD_COST;s.fishOwnsRod=true
+    }else{
+      if(s.inventory.coins<FISH_BORROW_COST){
+        s.notifText=`Not enough coins to borrow the rod either!`;s.notifTimer=240
+        return
+      }
+      s.inventory.coins-=FISH_BORROW_COST;s.fishRodBorrowed=true
+    }
+    s.gameStage=FISH_BUY_BAIT
+    setFishScrollKind(null)
+  }
 
   useEffect(()=>{
     completeRef.current=()=>{
+      // Freeplay is just for exploring the already-unlocked world, hitting a
+      // "complete this lesson" trigger while messing around shouldn't save
+      // progress or fade out into the finished-lesson screen.
+      if(freeplay)return
       const inv = stateRef.current.inventory
       if(variant==="lesson1"){
         saveGameLesson("unit1GameCompleted",inv.coins,inv.berries).catch(()=>{})
@@ -1229,12 +1666,15 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
         saveGameLesson("investIntroCompleted",inv.coins,inv.berries).catch(()=>{})
         setFinalCoins(inv.coins)
         triggerFadeOut(()=>setLessonDone(true))
+      }else if(variant==="lessonFish"){
+        saveGameLesson("fishGameplayCompleted",inv.coins,inv.berries).catch(()=>{})
+        triggerFadeOut(()=>router.push("/learn"))
       }else{
         saveGameLesson("farmPhase1Completed",inv.coins,inv.berries).catch(()=>{})
         triggerFadeOut(()=>router.push("/learn"))
       }
     }
-  },[router,variant])
+  },[router,variant,freeplay])
 
   useEffect(()=>{
     const canvas=canvasRef.current
@@ -1274,16 +1714,51 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
       if(pausedRef.current)return
       // On iOS/Android a held touch on a focusable element can trigger the
       // text-selection callout or a native scroll/zoom gesture, which cancels
-      // the drag — preventDefault + capture stop that from hijacking the hold.
+      // the drag, preventDefault + capture stop that from hijacking the hold.
       e.preventDefault()
+      // Tapping the FOOD bar itself eats, a HUD click, not a move-to-point.
+      const rect=canvas.getBoundingClientRect()
+      const sx=e.clientX-rect.left, sy=e.clientY-rect.top
+      const fb=stateRef.current.foodBarRect
+      if(fb&&sx>=fb.x&&sx<=fb.x+fb.w&&sy>=fb.y&&sy<=fb.y+fb.h){
+        stateRef.current.foodTapPending=true
+        return
+      }
+      // Pressing down on a filled inventory slot starts a drag-to-reorder
+      // instead of the usual click-and-hold walk.
+      const ip=stateRef.current.inventoryPanelRect
+      if(ip){
+        const idx=inventorySlotIndexAt(sx,sy,ip.x,ip.y)
+        const slotType=idx>=0?stateRef.current.inventory.slots[idx]:null
+        if(idx>=0&&slotType&&inventoryItemCount(stateRef.current.inventory,slotType)>0){
+          try{canvas.setPointerCapture(e.pointerId)}catch{}
+          activePointerId=e.pointerId
+          stateRef.current.invDragFromIndex=idx
+          stateRef.current.invDragPointerX=sx
+          stateRef.current.invDragPointerY=sy
+          return
+        }
+      }
       try{canvas.setPointerCapture(e.pointerId)}catch{}
       activePointerId=e.pointerId
       const{wx,wy}=pointerToWorld(e.clientX,e.clientY)
       stateRef.current.pointerDown=true
       stateRef.current.pointerWX=wx
       stateRef.current.pointerWY=wy
+      // A tap/click also stands in for a one-frame [Z]/[R] press, so touch
+      // users can advance dialogue, confirm menu choices, and respawn by
+      // tapping instead of needing a keyboard.
+      stateRef.current.pointerTapPending=true
     }
     const onPointerMove=(e:PointerEvent)=>{
+      if(stateRef.current.invDragFromIndex!==null){
+        if(activePointerId!==null&&e.pointerId!==activePointerId)return
+        e.preventDefault()
+        const rect=canvas.getBoundingClientRect()
+        stateRef.current.invDragPointerX=e.clientX-rect.left
+        stateRef.current.invDragPointerY=e.clientY-rect.top
+        return
+      }
       if(!stateRef.current.pointerDown)return
       if(activePointerId!==null&&e.pointerId!==activePointerId)return
       e.preventDefault()
@@ -1294,6 +1769,16 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
     const onPointerUp=(e:PointerEvent)=>{
       if(activePointerId!==null&&e.pointerId!==activePointerId)return
       activePointerId=null
+      if(stateRef.current.invDragFromIndex!==null){
+        const from=stateRef.current.invDragFromIndex
+        const ip=stateRef.current.inventoryPanelRect
+        const rect=canvas.getBoundingClientRect()
+        const sx=e.clientX-rect.left, sy=e.clientY-rect.top
+        const to=ip?inventorySlotIndexAt(sx,sy,ip.x,ip.y):-1
+        if(to>=0&&to!==from)swapInventorySlots(stateRef.current.inventory,from,to)
+        stateRef.current.invDragFromIndex=null
+        return
+      }
       stateRef.current.pointerDown=false
     }
     const onContextMenu=(e:MouseEvent)=>e.preventDefault()
@@ -1307,7 +1792,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
     ctx.fillStyle="white";ctx.font="bold 18px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
     ctx.fillText("Loading map…",canvas.offsetWidth/2,canvas.offsetHeight/2)
 
-    if(variant==="lessonInvest"){stateRef.current.inventory.berries=LIV_START_BERRIES}
+    if(variant==="lessonInvest"){stateRef.current.inventory.berries=LIV_START_BERRIES;if(LIV_START_BERRIES>0)claimInventorySlot(stateRef.current.inventory,"berry")}
 
     loadImages().then(imgs=>{
       stateRef.current.imgs=imgs
@@ -1317,26 +1802,32 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
         const s=stateRef.current
         s.frame++
         const{keys}=s
+        const tapInjected=s.pointerTapPending
+        if(tapInjected){keys.add("z");keys.add("r");s.pointerTapPending=false}
+        const foodTapInjected=s.foodTapPending
+        if(foodTapInjected){keys.add("x");s.foodTapPending=false}
 
         // ── Sustenance drain ───────────────────────────────────────────────
         if(!s.dayOver&&s.gameStage<stageComplete&&!pausedRef.current){
           s.sustenance=Math.max(0,s.sustenance-MAP_DRAIN)
           if(s.sustenance<=0&&!s.dayOver){
             const dBerries=Math.floor(s.inventory.berries*2/3)
+            const dApples=Math.floor(s.inventory.apples*2/3)
             const dCoins=Math.floor(s.inventory.coins*2/3)
             const lBerries=s.inventory.berries-dBerries
+            const lApples=s.inventory.apples-dApples
             const lCoins=s.inventory.coins-dCoins
-            s.deathDropped={berries:dBerries,coins:dCoins}
-            s.deathLost={berries:lBerries,coins:lCoins}
-            if(dBerries>0||dCoins>0){
+            s.deathDropped={berries:dBerries,apples:dApples,coins:dCoins}
+            s.deathLost={berries:lBerries,apples:lApples,coins:lCoins}
+            if(dBerries>0||dApples>0||dCoins>0){
               const spread=TS*1.5
               s.drops.push({
                 wx:s.px+(Math.random()-0.5)*spread,
                 wy:s.py+(Math.random()-0.5)*spread,
-                berries:dBerries,coins:dCoins,
+                berries:dBerries,apples:dApples,coins:dCoins,
               })
             }
-            s.inventory.berries=0;s.inventory.coins=0
+            s.inventory.berries=0;s.inventory.apples=0;s.inventory.coins=0
             s.dayOver=true
           }
         }
@@ -1354,10 +1845,14 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
         if(s.harvestCooldown>0)s.harvestCooldown--
         const noMenu=(variant==="lesson1"||variant==="lessonBudget"||variant==="lessonLoans")?s.sellMenu===null:variant==="lessonInvest"?!s.livTradeMenu:true
         if((keys.has("z")||keys.has("Z"))&&!s.dayOver&&s.harvestCooldown===0&&nearFoliageIdx>=0&&noMenu){
-          s.inventory.berries+=HARVEST_BERRIES
+          const harvestedNode=s.foliage[nearFoliageIdx]
+          if(harvestedNode.type==="tree"){s.inventory.apples+=HARVEST_BERRIES;claimInventorySlot(s.inventory,"apple")}
+          else if(harvestedNode.type==="mushroom"){s.inventory.mushrooms+=HARVEST_BERRIES;claimInventorySlot(s.inventory,"mushroom")}
+          else if(harvestedNode.type==="wood"){s.inventory.wood+=HARVEST_BERRIES;claimInventorySlot(s.inventory,"wood")}
+          else{s.inventory.berries+=HARVEST_BERRIES;claimInventorySlot(s.inventory,"berry")}
           s.harvestCooldown=HARVEST_COOLDOWN
-          s.foliage[nearFoliageIdx].hasFruit=false
-          s.foliage[nearFoliageIdx].regenTimer=FOLIAGE_REGEN
+          harvestedNode.hasFruit=false
+          harvestedNode.regenTimer=FOLIAGE_REGEN
           keys.delete("z");keys.delete("Z")
         }
 
@@ -1366,12 +1861,13 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           if(variant==="lessonInvest"&&s.livBread>0){
             s.livBread--;s.sustenance=SUSTENANCE_MAX
             keys.delete("x");keys.delete("X")
-          }else if(s.inventory.berries>0){
-            s.inventory.berries--
+          }else if(s.inventory.berries>0||s.inventory.apples>0){
+            if(s.inventory.berries>0)s.inventory.berries--
+            else s.inventory.apples--
             s.sustenance=Math.min(SUSTENANCE_MAX,s.sustenance+BERRY_SUSTENANCE)
             keys.delete("x");keys.delete("X")
             if(variant==="lesson1"&&s.gameStage===L1_HARVEST){
-              s.gameStage=L1_SELL_INTRO;s.dialogIdx=0
+              s.gameStage=L1_TOUR;s.dialogIdx=0
             }
           }
         }
@@ -1392,20 +1888,19 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           const blooDist=Math.hypot(s.px-s.bloo.x,s.py-s.bloo.y)
           const nearBloo=blooDist<TS*2.5
           if(!nearBloo)s.blooHarvestDismissed=false
+          if(!nearBloo)s.blooRecapOpen=false
           const blooDialogue=nearBloo&&(
             s.gameStage===L1_INTRO||(s.gameStage===L1_HARVEST&&!s.blooHarvestDismissed)||
-            s.gameStage===L1_SELL_INTRO||s.gameStage===L1_GROSS_TALK
+            s.gameStage===L1_TOUR||s.gameStage===L1_SELL_INTRO||s.gameStage===L1_WRAP_UP
           )
-          const govDialogue=s.gameStage===L1_GOV_TAX&&s.govArrived
-          const anyDialogue=blooDialogue||govDialogue||s.sellMenu!==null
+          const anyDialogue=blooDialogue||s.sellMenu!==null||s.blooRecapOpen
 
           if(!blooDialogue)updateBloo(s.bloo,variant,s.gameStage,s.px,s.py)
-          updateGovernor(s.gov)
 
           // sell menu arrow keys
           if(s.sellMenu!==null&&s.sellMenu.phase==="select"){
             const smNpc=s.npcs[s.sellMenu.npcIdx]
-            const maxSell=Math.min(s.inventory.berries,L1_NPC_MAX_TRADES-smNpc.tradesDone)
+            const maxSell=Math.min(combinedGoods(s.inventory),L1_NPC_MAX_TRADES-smNpc.tradesDone)
             if(keys.has("ArrowRight")||keys.has("ArrowUp")){s.sellMenu.amount=Math.min(s.sellMenu.amount+1,maxSell);keys.delete("ArrowRight");keys.delete("ArrowUp")}
             if(keys.has("ArrowLeft")||keys.has("ArrowDown")){s.sellMenu.amount=Math.max(s.sellMenu.amount-1,0);keys.delete("ArrowLeft");keys.delete("ArrowDown")}
           }
@@ -1421,16 +1916,25 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           if(eDown&&!eUsed&&s.sellMenu!==null){
             if(s.sellMenu.phase==="result"){
               s.sellMenu=null
+              // Sold everything → lesson's done.
+              if(combinedGoods(s.inventory)===0&&s.gameStage===L1_SELLING){
+                s.gameStage=L1_WRAP_UP;s.dialogIdx=0
+              }
             }else if(s.sellMenu.amount>0){
               const smNpc=s.npcs[s.sellMenu.npcIdx]
               const amt=s.sellMenu.amount
-              let earned=amt*L1_COIN_PER_BERRY
-              const gettingTip=smNpc.isTipNpc&&!smNpc.tipUsed
+              const alloc=sellAllocation(amt,s.inventory.berries,s.inventory.apples,s.inventory.wood,s.inventory.mushrooms)
+              let earned=sellEarnings(alloc,L1_SELL_PRICES)
+              // Bonus coin for mushrooms specifically — they're rare, and Market
+              // Trader (the tip NPC) only throws it in on a sale that includes one.
+              const gettingTip=smNpc.isTipNpc&&!smNpc.tipUsed&&alloc.fromMushrooms>0
               if(gettingTip){earned+=L1_TIP_COINS;smNpc.tipUsed=true}
-              s.inventory.berries-=amt;s.inventory.coins+=earned
+              s.inventory.berries-=alloc.fromBerries;s.inventory.apples-=alloc.fromApples
+              s.inventory.wood-=alloc.fromWood;s.inventory.mushrooms-=alloc.fromMushrooms
+              s.inventory.coins+=earned
               smNpc.tradesDone+=amt
               if(smNpc.tradeTimer===0)smNpc.tradeTimer=L1_NPC_BUY_RESET
-              if(gettingTip){s.notifText=`Market Trader tipped you +${L1_TIP_COINS} coins! 🎉`;s.notifTimer=300}
+              if(gettingTip){s.notifText=`Market Trader tipped you +${L1_TIP_COINS} coins for that rare mushroom! 🎉`;s.notifTimer=300}
               s.sellMenu={npcIdx:s.sellMenu.npcIdx,amount:amt,phase:"result",resultLine:L1_NPC_SOLD[s.sellMenu.npcIdx],earnedCoins:earned}
             }
             consumeE()
@@ -1445,33 +1949,37 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
             s.blooRemindIdx++;if(s.blooRemindIdx>=L1_BLOO_HARVEST_REMIND.length){s.blooHarvestDismissed=true;s.blooRemindIdx=0}
             consumeE()
           }
-          // 2. bloo sell intro
-          if(eDown&&!eUsed&&nearBloo&&s.gameStage===L1_SELL_INTRO){
-            s.dialogIdx++;if(s.dialogIdx>=L1_BLOO_SELL.length){s.gameStage=L1_SELLING;s.dialogIdx=0}
+          // 2. bloo building tour + forage pitch
+          if(eDown&&!eUsed&&nearBloo&&s.gameStage===L1_TOUR){
+            s.dialogIdx++;if(s.dialogIdx>=L1_BLOO_TOUR.length){s.gameStage=L1_FORAGE;s.dialogIdx=0}
             consumeE()
           }
-          // 3. bloo gross talk
-          if(eDown&&!eUsed&&nearBloo&&s.gameStage===L1_GROSS_TALK){
+          // 3. read a tour-stop sign
+          if(eDown&&!eUsed){
+            for(const stop of L1_TOUR_STOPS){
+              if(Math.hypot(s.px-stop.x,s.py-stop.y)<L1_TOUR_INTERACT){
+                s.notifText=stop.sign;s.notifTimer=280
+                consumeE()
+                break
+              }
+            }
+          }
+          // 4. bloo sell intro
+          if(eDown&&!eUsed&&nearBloo&&s.gameStage===L1_SELL_INTRO){
+            s.dialogIdx++;if(s.dialogIdx>=L1_BLOO_SELL_INTRO.length){s.gameStage=L1_SELLING;s.dialogIdx=0}
+            consumeE()
+          }
+          // 5. bloo wrap-up
+          if(eDown&&!eUsed&&nearBloo&&s.gameStage===L1_WRAP_UP){
             s.dialogIdx++
-            if(s.dialogIdx>=L1_BLOO_GROSS.length){
-              s.gameStage=L1_GOV_TAX;s.dialogIdx=0
-              s.gov.forcedTarget={x:s.px,y:s.py}
-              s.govTaxAmount=Math.ceil(s.inventory.coins*TAX_RATE)
-              s.govArrived=false
+            if(s.dialogIdx>=L1_BLOO_WRAP_UP.length){
+              s.gameStage=L1_COMPLETE
+              if(!s.completionCalled){s.completionCalled=true;completeRef.current?.()}
             }
             consumeE()
           }
-          // 4. governor tax acceptance
-          if(eDown&&!eUsed&&s.gameStage===L1_GOV_TAX&&s.govArrived){
-            s.inventory.coins=Math.max(0,s.inventory.coins-s.govTaxAmount)
-            s.notifText=`Income tax: ${s.govTaxAmount} coins taken!`;s.notifTimer=300
-            s.gov.forcedTarget=null
-            s.gameStage=L1_COMPLETE
-            if(!s.completionCalled){s.completionCalled=true;completeRef.current?.()}
-            consumeE()
-          }
-          // 5. open sell menu near NPC
-          if(eDown&&!eUsed&&s.gameStage>=L1_SELLING&&s.gameStage<L1_GROSS_TALK&&s.sellMenu===null){
+          // 6. open sell menu near NPC
+          if(eDown&&!eUsed&&s.gameStage===L1_SELLING&&s.sellMenu===null){
             let nearNpcIdx=-1,nearNpcDist=Infinity
             for(let i=0;i<s.npcs.length;i++){
               const d=Math.hypot(s.px-s.npcs[i].x,s.py-s.npcs[i].y)
@@ -1479,32 +1987,34 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
             }
             if(nearNpcIdx>=0){
               const npc=s.npcs[nearNpcIdx]
-              const maxSell=Math.min(s.inventory.berries,L1_NPC_MAX_TRADES-npc.tradesDone)
+              const maxSell=Math.min(combinedGoods(s.inventory),L1_NPC_MAX_TRADES-npc.tradesDone)
               s.sellMenu={npcIdx:nearNpcIdx,amount:Math.min(1,maxSell),phase:"select",resultLine:"",earnedCoins:0}
               consumeE()
             }
+          }
+          // 7. recap: Z near Bloo outside a live dialogue repeats his last line
+          if(eDown&&!eUsed&&nearBloo&&!blooDialogue&&s.blooLastLine){
+            s.blooRecapOpen=!s.blooRecapOpen
+            consumeE()
           }
 
           updateNpcs(s.npcs,s.sellMenu?.npcIdx??-1)
 
           // stage transitions
-          if(s.gameStage===L1_SELLING&&s.inventory.coins>=L1_COIN_GOAL){
-            s.gameStage=L1_GROSS_TALK;s.dialogIdx=0
-            s.notifText=`${L1_COIN_GOAL} coins! Find Bloo near the Governor!`;s.notifTimer=360
-          }
-          if(s.gameStage===L1_GOV_TAX&&!s.govArrived){
-            if(Math.hypot(s.px-s.gov.x,s.py-s.gov.y)<GOV_INTERACT){s.govArrived=true;s.gov.forcedTarget=null}
+          if(s.gameStage===L1_FORAGE&&combinedGoods(s.inventory)>=L1_FORAGE_GOAL){
+            s.gameStage=L1_SELL_INTRO;s.dialogIdx=0
+            s.notifText=`${L1_FORAGE_GOAL} items collected! Head to the Market to sell.`;s.notifTimer=360
           }
 
-          // movement — flat SPEED, no sustenance penalty
+          // movement: flat SPEED, no sustenance penalty
           if(!s.dayOver&&s.gameStage<L1_COMPLETE&&!anyDialogue){
             const{dx,dy}=computeMoveDelta(keys,spd,s.pointerDown,s.px,s.py,s.pointerWX,s.pointerWY)
             if(dx||dy){
               const n=resolveMove(s.px,s.py,dx,dy)
               let nx=n.x,ny=n.y
               for(const fn of s.foliage){
-                const hr=fn.type==="tree"?TREE_HIT_R:BUSH_HIT_R
-                const hcy=fn.wy-(fn.type==="tree"?TREE_HIT_OY:BUSH_HIT_OY)
+                const hr=foliageHitR(fn.type)
+                const hcy=fn.wy-foliageHitOY(fn.type)
                 const ddx=nx-fn.wx,ddy=ny-hcy,dist=Math.hypot(ddx,ddy)
                 const minD=PLAYER_R+hr
                 if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
@@ -1514,19 +2024,20 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           }
 
         // ─────────────────────────────────────────────────────────────────
-        // LESSON BUDGET GAME FLOW  (lesson 10 — Bloo talks about budgeting)
+        // LESSON BUDGET GAME FLOW  (lesson 10, Bloo talks about budgeting)
         // ─────────────────────────────────────────────────────────────────
         }else if(variant==="lessonBudget"){
           const blooDist=Math.hypot(s.px-s.bloo.x,s.py-s.bloo.y)
           const nearBloo=blooDist<TS*2.5
+          if(!nearBloo)s.blooRecapOpen=false
           const blooDialogue=nearBloo&&(s.gameStage===LB_INTRO||s.gameStage===LB_BLOO_BUDGET)
-          const anyDialogue=blooDialogue||s.sellMenu!==null||s.houseSaleOpen
+          const anyDialogue=blooDialogue||s.sellMenu!==null||s.houseSaleOpen||s.blooRecapOpen
           if(!blooDialogue)updateBloo(s.bloo,variant,s.gameStage,s.px,s.py)
 
           // sell menu arrow keys
           if(s.sellMenu!==null&&s.sellMenu.phase==="select"){
             const smNpc=s.npcs[s.sellMenu.npcIdx]
-            const maxSell=Math.min(s.inventory.berries,LB_NPC_MAX_TRADES-smNpc.tradesDone)
+            const maxSell=Math.min(combinedGoods(s.inventory),LB_NPC_MAX_TRADES-smNpc.tradesDone)
             if(keys.has("ArrowRight")||keys.has("ArrowUp")){s.sellMenu.amount=Math.min(s.sellMenu.amount+1,maxSell);keys.delete("ArrowRight");keys.delete("ArrowUp")}
             if(keys.has("ArrowLeft")||keys.has("ArrowDown")){s.sellMenu.amount=Math.max(s.sellMenu.amount-1,0);keys.delete("ArrowLeft");keys.delete("ArrowDown")}
           }
@@ -1547,10 +2058,13 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
             if(s.sellMenu.phase==="result"){s.sellMenu=null}
             else if(s.sellMenu.amount>0){
               const smNpc=s.npcs[s.sellMenu.npcIdx],amt=s.sellMenu.amount
-              let earned=amt*LB_COIN_PER_BERRY
+              const alloc=sellAllocation(amt,s.inventory.berries,s.inventory.apples,s.inventory.wood,s.inventory.mushrooms)
+              let earned=sellEarnings(alloc,FLAT_SELL_PRICES)
               const gettingTip=smNpc.isTipNpc&&!smNpc.tipUsed
               if(gettingTip){earned+=LB_TIP_COINS;smNpc.tipUsed=true}
-              s.inventory.berries-=amt;s.inventory.coins+=earned
+              s.inventory.berries-=alloc.fromBerries;s.inventory.apples-=alloc.fromApples
+              s.inventory.wood-=alloc.fromWood;s.inventory.mushrooms-=alloc.fromMushrooms
+              s.inventory.coins+=earned
               smNpc.tradesDone+=amt;if(smNpc.tradeTimer===0)smNpc.tradeTimer=LB_NPC_BUY_RESET
               if(gettingTip){s.notifText=`Market Trader tipped you +${LB_TIP_COINS} coins! 🎉`;s.notifTimer=300}
               s.sellMenu={npcIdx:s.sellMenu.npcIdx,amount:amt,phase:"result",resultLine:L1_NPC_SOLD[s.sellMenu.npcIdx],earnedCoins:earned}
@@ -1566,7 +2080,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           if(eDown&&!eUsed&&nearBloo&&s.gameStage===LB_INTRO){
             s.dialogIdx++;
             if(s.dialogIdx>=LB_BLOO_INTRO.length){
-              s.inventory.berries+=10;s.notifText="Bloo gave you 10 berries! 🍒";s.notifTimer=300
+              s.inventory.berries+=10;claimInventorySlot(s.inventory,"berry");s.notifText="Bloo gave you 10 berries! 🍒";s.notifTimer=300
               s.gameStage=LB_EXPLORE;s.dialogIdx=0
             }
             consumeE()
@@ -1585,7 +2099,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
             let nearNpcIdx=-1,nearNpcDist=Infinity
             for(let i=0;i<s.npcs.length;i++){const d=Math.hypot(s.px-s.npcs[i].x,s.py-s.npcs[i].y);if(d<TS*2.5&&d<nearNpcDist){nearNpcDist=d;nearNpcIdx=i}}
             if(nearNpcIdx>=0){
-              const npc=s.npcs[nearNpcIdx],maxSell=Math.min(s.inventory.berries,LB_NPC_MAX_TRADES-npc.tradesDone)
+              const npc=s.npcs[nearNpcIdx],maxSell=Math.min(combinedGoods(s.inventory),LB_NPC_MAX_TRADES-npc.tradesDone)
               s.sellMenu={npcIdx:nearNpcIdx,amount:Math.min(1,maxSell),phase:"select",resultLine:"",earnedCoins:0};consumeE()
             }
           }
@@ -1594,6 +2108,11 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
             for(let ei=1;ei<ENTRANCES.length;ei++){
               if(Math.hypot(s.px-ENTRANCES[ei].wx,s.py-ENTRANCES[ei].wy)<TS*2){s.houseSaleOpen=true;s.houseSaleIdx=ei;consumeE();break}
             }
+          }
+          // 6. recap: Z near Bloo outside a live dialogue repeats his last line
+          if(eDown&&!eUsed&&nearBloo&&!blooDialogue&&s.blooLastLine){
+            s.blooRecapOpen=!s.blooRecapOpen
+            consumeE()
           }
 
           updateNpcs(s.npcs,s.sellMenu?.npcIdx??-1)
@@ -1604,8 +2123,8 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
             if(dx||dy){
               const n=resolveMove(s.px,s.py,dx,dy);let nx=n.x,ny=n.y
               for(const fn of s.foliage){
-                const hr=fn.type==="tree"?TREE_HIT_R:BUSH_HIT_R
-                const hcy=fn.wy-(fn.type==="tree"?TREE_HIT_OY:BUSH_HIT_OY)
+                const hr=foliageHitR(fn.type)
+                const hcy=fn.wy-foliageHitOY(fn.type)
                 const ddx=nx-fn.wx,ddy=ny-hcy,dist=Math.hypot(ddx,ddy),minD=PLAYER_R+hr
                 if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
               }
@@ -1614,19 +2133,20 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           }
 
         // ─────────────────────────────────────────────────────────────────
-        // LESSON LOANS GAME FLOW  (lesson 19 — Bloo says "need a loan", go to bank)
+        // LESSON LOANS GAME FLOW  (lesson 19, Bloo says "need a loan", go to bank)
         // ─────────────────────────────────────────────────────────────────
         }else if(variant==="lessonLoans"){
           const blooDist=Math.hypot(s.px-s.bloo.x,s.py-s.bloo.y)
           const nearBloo=blooDist<TS*2.5
+          if(!nearBloo)s.blooRecapOpen=false
           const blooDialogue=nearBloo&&(s.gameStage===LL_INTRO||s.gameStage===LL_BLOO_TALK)
-          const anyDialogue=blooDialogue||s.sellMenu!==null||s.houseSaleOpen
+          const anyDialogue=blooDialogue||s.sellMenu!==null||s.houseSaleOpen||s.blooRecapOpen
           if(!blooDialogue)updateBloo(s.bloo,variant,s.gameStage,s.px,s.py)
 
           // sell menu arrow keys
           if(s.sellMenu!==null&&s.sellMenu.phase==="select"){
             const smNpc=s.npcs[s.sellMenu.npcIdx]
-            const maxSell=Math.min(s.inventory.berries,LB_NPC_MAX_TRADES-smNpc.tradesDone)
+            const maxSell=Math.min(combinedGoods(s.inventory),LB_NPC_MAX_TRADES-smNpc.tradesDone)
             if(keys.has("ArrowRight")||keys.has("ArrowUp")){s.sellMenu.amount=Math.min(s.sellMenu.amount+1,maxSell);keys.delete("ArrowRight");keys.delete("ArrowUp")}
             if(keys.has("ArrowLeft")||keys.has("ArrowDown")){s.sellMenu.amount=Math.max(s.sellMenu.amount-1,0);keys.delete("ArrowLeft");keys.delete("ArrowDown")}
           }
@@ -1647,10 +2167,13 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
             if(s.sellMenu.phase==="result"){s.sellMenu=null}
             else if(s.sellMenu.amount>0){
               const smNpc=s.npcs[s.sellMenu.npcIdx],amt=s.sellMenu.amount
-              let earned=amt*LB_COIN_PER_BERRY
+              const alloc=sellAllocation(amt,s.inventory.berries,s.inventory.apples,s.inventory.wood,s.inventory.mushrooms)
+              let earned=sellEarnings(alloc,FLAT_SELL_PRICES)
               const gettingTip=smNpc.isTipNpc&&!smNpc.tipUsed
               if(gettingTip){earned+=LB_TIP_COINS;smNpc.tipUsed=true}
-              s.inventory.berries-=amt;s.inventory.coins+=earned
+              s.inventory.berries-=alloc.fromBerries;s.inventory.apples-=alloc.fromApples
+              s.inventory.wood-=alloc.fromWood;s.inventory.mushrooms-=alloc.fromMushrooms
+              s.inventory.coins+=earned
               smNpc.tradesDone+=amt;if(smNpc.tradeTimer===0)smNpc.tradeTimer=LB_NPC_BUY_RESET
               if(gettingTip){s.notifText=`Market Trader tipped you +${LB_TIP_COINS} coins! 🎉`;s.notifTimer=300}
               s.sellMenu={npcIdx:s.sellMenu.npcIdx,amount:amt,phase:"result",resultLine:L1_NPC_SOLD[s.sellMenu.npcIdx],earnedCoins:earned}
@@ -1681,7 +2204,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
             let nearNpcIdx=-1,nearNpcDist=Infinity
             for(let i=0;i<s.npcs.length;i++){const d=Math.hypot(s.px-s.npcs[i].x,s.py-s.npcs[i].y);if(d<TS*2.5&&d<nearNpcDist){nearNpcDist=d;nearNpcIdx=i}}
             if(nearNpcIdx>=0){
-              const npc=s.npcs[nearNpcIdx],maxSell=Math.min(s.inventory.berries,LB_NPC_MAX_TRADES-npc.tradesDone)
+              const npc=s.npcs[nearNpcIdx],maxSell=Math.min(combinedGoods(s.inventory),LB_NPC_MAX_TRADES-npc.tradesDone)
               s.sellMenu={npcIdx:nearNpcIdx,amount:Math.min(1,maxSell),phase:"select",resultLine:"",earnedCoins:0};consumeE()
             }
           }
@@ -1690,6 +2213,11 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
             for(let ei=1;ei<ENTRANCES.length;ei++){
               if(Math.hypot(s.px-ENTRANCES[ei].wx,s.py-ENTRANCES[ei].wy)<TS*2){s.houseSaleOpen=true;s.houseSaleIdx=ei;consumeE();break}
             }
+          }
+          // 6. recap: Z near Bloo outside a live dialogue repeats his last line
+          if(eDown&&!eUsed&&nearBloo&&!blooDialogue&&s.blooLastLine){
+            s.blooRecapOpen=!s.blooRecapOpen
+            consumeE()
           }
 
           updateNpcs(s.npcs,s.sellMenu?.npcIdx??-1)
@@ -1708,8 +2236,8 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
             if(dx||dy){
               const n=resolveMove(s.px,s.py,dx,dy);let nx=n.x,ny=n.y
               for(const fn of s.foliage){
-                const hr=fn.type==="tree"?TREE_HIT_R:BUSH_HIT_R
-                const hcy=fn.wy-(fn.type==="tree"?TREE_HIT_OY:BUSH_HIT_OY)
+                const hr=foliageHitR(fn.type)
+                const hcy=fn.wy-foliageHitOY(fn.type)
                 const ddx=nx-fn.wx,ddy=ny-hcy,dist=Math.hypot(ddx,ddy),minD=PLAYER_R+hr
                 if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
               }
@@ -1718,13 +2246,14 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           }
 
         // ─────────────────────────────────────────────────────────────────
-        // LESSON INVEST GAME FLOW  (Lesson 37 — Island Trading Center)
+        // LESSON INVEST GAME FLOW  (Lesson 37, Island Trading Center)
         // ─────────────────────────────────────────────────────────────────
         }else if(variant==="lessonInvest"){
           const blooDist=Math.hypot(s.px-s.bloo.x,s.py-s.bloo.y)
           const nearBloo=blooDist<TS*2.5
+          if(!nearBloo)s.blooRecapOpen=false
           const blooDialogue=nearBloo&&(s.gameStage===LIV_INTRO||s.gameStage===LIV_BOAT)
-          const anyDialogue=blooDialogue||s.livTradeMenu
+          const anyDialogue=blooDialogue||s.livTradeMenu||s.blooRecapOpen
           if(!blooDialogue)updateBloo(s.bloo,variant,s.gameStage,s.px,s.py)
 
           // boat moves north once the second dialogue phase starts
@@ -1738,7 +2267,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
             s.livSeedTimer--
             if(s.livSeedTimer===0){
               const gained=s.livSeeds*LIV_SEED_BERRY_YIELD
-              s.inventory.berries+=gained
+              s.inventory.berries+=gained;claimInventorySlot(s.inventory,"berry")
               s.notifText=`Seeds sprouted! +${gained} berries! 🌱`;s.notifTimer=240
               s.livSeeds=0
             }
@@ -1772,7 +2301,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
             s.dialogIdx++;
             if(s.dialogIdx>=LIV_BLOO_BOAT.length){
               s.gameStage=LIV_TRADE;s.dialogIdx=0
-              s.notifText="Walk to the Port Trader at the dock — press [Z]!";s.notifTimer=360
+              s.notifText="Walk to the Port Trader at the dock, press [Z]!";s.notifTimer=360
             }
             consumeE()
           }
@@ -1798,16 +2327,21 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
                 if(s.livTradeMenuIdx===0){s.livBread++}
                 else if(s.livTradeMenuIdx===1){s.livSeeds++;if(s.livSeedTimer===0)s.livSeedTimer=LIV_SEED_GROW_FRAMES}
                 else{s.livWood++}
-                const msgs=["🍞 Got Bread — eat [X] to restore energy!","🌱 Seeds planted! Come back in 15s for berries.","🪵 Got Wood! Sell it at the Market (south-east)."]
+                const msgs=["🍞 Got Bread, eat [X] to restore energy!","🌱 Seeds planted! Come back in 15s for berries.","🪵 Got Wood! Sell it at the Market (south-east)."]
                 s.notifText=`Trade ${s.livTrades}/${LIV_TRADES_NEEDED}: ${msgs[s.livTradeMenuIdx]}`;s.notifTimer=200
                 if(s.livTrades>=LIV_TRADES_NEEDED&&!s.completionCalled){
                   s.gameStage=LIV_COMPLETE;s.completionCalled=true;completeRef.current?.()
                 }
               }else{
-                s.notifText=`Need ${cost} berries — only have ${s.inventory.berries}!`;s.notifTimer=120
+                s.notifText=`Need ${cost} berries, only have ${s.inventory.berries}!`;s.notifTimer=120
               }
               consumeE()
             }
+          }
+          // 5. recap: Z near Bloo outside a live dialogue repeats his last line
+          if(eDown&&!eUsed&&nearBloo&&!blooDialogue&&s.blooLastLine){
+            s.blooRecapOpen=!s.blooRecapOpen
+            consumeE()
           }
 
           updateNpcs(s.npcs)
@@ -1818,8 +2352,8 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
             if(dx||dy){
               const n=resolveMove(s.px,s.py,dx,dy);let nx=n.x,ny=n.y
               for(const fn of s.foliage){
-                const hr=fn.type==="tree"?TREE_HIT_R:BUSH_HIT_R
-                const hcy=fn.wy-(fn.type==="tree"?TREE_HIT_OY:BUSH_HIT_OY)
+                const hr=foliageHitR(fn.type)
+                const hcy=fn.wy-foliageHitOY(fn.type)
                 const ddx=nx-fn.wx,ddy=ny-hcy,dist=Math.hypot(ddx,ddy),minD=PLAYER_R+hr
                 if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
               }
@@ -1828,105 +2362,178 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           }
 
         // ─────────────────────────────────────────────────────────────────
-        // LESSON FARM GAME FLOW (dynamic Income stream — "farm" choice)
+        // LESSON FARM GAME FLOW (dynamic Income stream, "farm" choice)
         // ─────────────────────────────────────────────────────────────────
         }else if(variant==="lessonFarm"){
           const blooDist=Math.hypot(s.px-s.bloo.x,s.py-s.bloo.y)
           const nearBloo=blooDist<TS*2.5
-          const nearBink=Math.hypot(s.px-FARM_BINK_X,s.py-FARM_BINK_Y)<FARM_INTERACT
+          if(!nearBloo)s.blooRecapOpen=false
           const blooDialogue=nearBloo&&s.gameStage===FARM_TALK_BLOO
-          const binkDialogue=nearBink&&s.gameStage===FARM_FIND_BINK
-          const choiceOpen=s.gameStage===FARM_CHOICE
-          const trapDialogue=s.gameStage===FARM_TRAP_OUTCOME
+          const binkDialogue=s.gameStage===FARM_BINK_INTERRUPT
+          const choiceOpen=s.gameStage===FARM_CLEAR_CHOICE
           const revealDialogue=s.gameStage===FARM_PLANT_REVEAL
-          const anyDialogue=blooDialogue||binkDialogue||choiceOpen||trapDialogue||revealDialogue
+          const seedsPitchDialogue=s.gameStage===FARM_SEEDS_PITCH
+          const wrapDialogue=s.gameStage===FARM_WRAP_UP
+          const marketIsOpen=marketOpenRef.current
+          const anyDialogue=blooDialogue||binkDialogue||choiceOpen||revealDialogue||seedsPitchDialogue||wrapDialogue||s.blooRecapOpen||s.sellMenu!==null||marketIsOpen
 
           if(!blooDialogue)updateBloo(s.bloo,variant,s.gameStage,s.px,s.py)
-          updateNpcs(s.npcs)
+          updateNpcs(s.npcs,s.sellMenu?.npcIdx??-1)
 
           const eDown=keys.has("z")||keys.has("Z")
           let eUsed=false
           const consumeE=()=>{eUsed=true;keys.delete("z");keys.delete("Z")}
 
-          // 1. Bloo intro — sends the player to find Bink
+          // sell-menu arrow keys + close with [X], lets the player grind
+          // berries into coins any time they're short.
+          if(s.sellMenu!==null&&s.sellMenu.phase==="select"){
+            const smNpc=s.npcs[s.sellMenu.npcIdx]
+            const maxSell=Math.min(combinedGoods(s.inventory),LB_NPC_MAX_TRADES-smNpc.tradesDone)
+            if(keys.has("ArrowRight")||keys.has("ArrowUp")){s.sellMenu.amount=Math.min(s.sellMenu.amount+1,maxSell);keys.delete("ArrowRight");keys.delete("ArrowUp")}
+            if(keys.has("ArrowLeft")||keys.has("ArrowDown")){s.sellMenu.amount=Math.max(s.sellMenu.amount-1,0);keys.delete("ArrowLeft");keys.delete("ArrowDown")}
+          }
+          if((keys.has("x")||keys.has("X"))&&s.sellMenu!==null&&s.sellMenu.phase==="select"){s.sellMenu=null;keys.delete("x");keys.delete("X")}
+
+          // 0. sell-menu confirm
+          if(eDown&&!eUsed&&s.sellMenu!==null){
+            if(s.sellMenu.phase==="result"){s.sellMenu=null}
+            else if(s.sellMenu.amount>0){
+              const smNpc=s.npcs[s.sellMenu.npcIdx],amt=s.sellMenu.amount
+              const alloc=sellAllocation(amt,s.inventory.berries,s.inventory.apples,s.inventory.wood,s.inventory.mushrooms)
+              let earned=sellEarnings(alloc,FLAT_SELL_PRICES)
+              const gettingTip=smNpc.isTipNpc&&!smNpc.tipUsed
+              if(gettingTip){earned+=LB_TIP_COINS;smNpc.tipUsed=true}
+              s.inventory.berries-=alloc.fromBerries;s.inventory.apples-=alloc.fromApples
+              s.inventory.wood-=alloc.fromWood;s.inventory.mushrooms-=alloc.fromMushrooms
+              s.inventory.coins+=earned
+              smNpc.tradesDone+=amt;if(smNpc.tradeTimer===0)smNpc.tradeTimer=LB_NPC_BUY_RESET
+              if(gettingTip){s.notifText=`Market Trader tipped you +${LB_TIP_COINS} coins! 🎉`;s.notifTimer=300}
+              s.sellMenu={npcIdx:s.sellMenu.npcIdx,amount:amt,phase:"result",resultLine:L1_NPC_SOLD[s.sellMenu.npcIdx],earnedCoins:earned}
+            }
+            consumeE()
+          }
+          // 1. Bloo intro: sends the player toward the Market for Pest-Bugs
           if(eDown&&!eUsed&&blooDialogue){
             s.dialogIdx++
-            if(s.dialogIdx>=FARM_BLOO_INTRO.length){s.gameStage=FARM_FIND_BINK;s.dialogIdx=0}
+            if(s.dialogIdx>=FARM_BLOO_INTRO.length){s.gameStage=FARM_TO_MARKET;s.dialogIdx=0}
             consumeE()
           }
-          // 2. Bink's pitch — ends by opening the real choice (not a scroll)
+          // 2. Walking toward the Market — Bink rolls up and interrupts
+          if(eDown&&!eUsed&&s.gameStage===FARM_TO_MARKET){
+            if(Math.hypot(s.px-ENTRANCES[4].wx,s.py-ENTRANCES[4].wy)<TS*2.5){
+              s.gameStage=FARM_BINK_INTERRUPT;s.binkDialogIdx=0
+              consumeE()
+            }
+          }
+          // 3. Bink's interrupt pitch (alternating Bink/Bloo) — ends by opening the choice
           if(eDown&&!eUsed&&binkDialogue){
             s.binkDialogIdx++
-            if(s.binkDialogIdx>=FARM_BINK_INTRO.length){s.gameStage=FARM_CHOICE;s.farmChoiceIdx=0}
+            if(s.binkDialogIdx>=FARM_BINK_INTERRUPT_LINES.length){s.gameStage=FARM_CLEAR_CHOICE;s.farmChoiceIdx=0}
             consumeE()
           }
-          // 3. Choice navigation + confirm
+          // 3b. Choice navigation + confirm — doesn't resolve instantly, just sends
+          // the player to go finalize it in person (at Bink, or at the Market).
           if(choiceOpen){
-            const n=PHASE_1_CONTENT.choices.length
+            const n=FARM_CLEAR_CHOICE_OPTIONS.length
             if(keys.has("ArrowUp")){s.farmChoiceIdx=(s.farmChoiceIdx+n-1)%n;keys.delete("ArrowUp")}
             if(keys.has("ArrowDown")){s.farmChoiceIdx=(s.farmChoiceIdx+1)%n;keys.delete("ArrowDown")}
             if(eDown&&!eUsed){
-              const chosen=PHASE_1_CONTENT.choices[s.farmChoiceIdx]
-              s.farmChosenId=chosen.id
-              if(chosen.id==="1A")s.gameStage=FARM_TASK_LOAN
-              else if(chosen.id==="1B")s.gameStage=FARM_TASK_MACHINE
-              else s.gameStage=FARM_TASK_DIG
+              s.farmChosenRoute=FARM_CLEAR_CHOICE_OPTIONS[s.farmChoiceIdx].id as "bugs"|"weeder"
+              s.gameStage=FARM_RESOLVE_CLEARING
               consumeE()
             }
           }
-          // 4. Loan Cabin (Savings Bank) — sign papers, pay for clearing
-          if(eDown&&!eUsed&&s.gameStage===FARM_TASK_LOAN){
-            if(Math.hypot(s.px-ENTRANCES[2].wx,s.py-ENTRANCES[2].wy)<TS*2){
-              const{state:afterChoice}=applyPhase1Choice("1A",s.farmState)
-              const{state:afterClearing}=payForPlotClearing(afterChoice)
-              s.farmState=afterClearing
-              s.gameStage=FARM_PLANT_REVEAL;s.farmRevealIdx=0
-              consumeE()
-            }
-          }
-          // 5. Bink's Fast-Cash machine
-          if(eDown&&!eUsed&&s.gameStage===FARM_TASK_MACHINE){
-            if(Math.hypot(s.px-FARM_MACHINE_X,s.py-FARM_MACHINE_Y)<FARM_INTERACT){
-              const{state:afterChoice}=applyPhase1Choice("1B",s.farmState)
-              const{state:afterClearing}=payForPlotClearing(afterChoice)
-              s.farmState=afterClearing
-              s.gameStage=FARM_TRAP_OUTCOME;s.dialogIdx=0
-              consumeE()
-            }
-          }
-          // 6. Dig spots — scatter berries at all 3
-          if(eDown&&!eUsed&&s.gameStage===FARM_TASK_DIG){
-            for(let i=0;i<FARM_DIG_SPOTS.length;i++){
-              if(!s.farmDigHits[i]&&Math.hypot(s.px-FARM_DIG_SPOTS[i].wx,s.py-FARM_DIG_SPOTS[i].wy)<FARM_INTERACT){
-                s.farmDigHits[i]=true
+          // 3c. Resolve the clearing in person — press [Z] at Bink or the Market
+          if(eDown&&!eUsed&&s.gameStage===FARM_RESOLVE_CLEARING){
+            if(s.farmChosenRoute==="weeder"){
+              if(Math.hypot(s.px-FARM_BINK_X,s.py-FARM_BINK_Y)<FARM_INTERACT){
+                const{state,coinsDelta}=clearPlotWithBinkWeeder(s.farmState)
+                s.farmState=state;s.inventory.coins+=coinsDelta
+                s.gameStage=FARM_PLANT_REVEAL;s.farmRevealIdx=0
                 consumeE()
-                if(s.farmDigHits.every(Boolean)){
-                  const{state}=applyPhase1Choice("1C",s.farmState)
-                  s.farmState=state
-                  s.gameStage=FARM_PLANT_REVEAL;s.farmRevealIdx=0
-                }
-                break
+              }
+            }else if(s.farmChosenRoute==="bugs"){
+              if(Math.hypot(s.px-ENTRANCES[4].wx,s.py-ENTRANCES[4].wy)<TS*2){
+                const{state,coinsDelta}=clearPlotWithPestBugs(s.farmState)
+                s.farmState=state;s.inventory.coins+=coinsDelta
+                s.gameStage=FARM_PLANT_REVEAL;s.farmRevealIdx=0
+                consumeE()
               }
             }
           }
-          // 7. Trap outcome dialogue (Bink's machine route, if it didn't cover the cost)
-          if(eDown&&!eUsed&&trapDialogue){
-            s.dialogIdx++
-            if(s.dialogIdx>=farmTrapLines(s.farmState).length){
-              s.gameStage=FARM_COMPLETE
-              if(!s.completionCalled){s.completionCalled=true;completeRef.current?.()}
-            }
-            consumeE()
-          }
-          // 8. Bloo explains the assigned plant — replaces any popup entirely
+          // 4. Bloo explains the assigned plant — replaces any popup entirely
           if(eDown&&!eUsed&&revealDialogue){
             const plant=s.farmState.assignedPlant?PLANT_REGISTRY[s.farmState.assignedPlant]:null
             const lines=plant?plantRevealLines(plant):["Let's get that plot growing!"]
             s.farmRevealIdx++
-            if(s.farmRevealIdx>=lines.length){
+            if(s.farmRevealIdx>=lines.length){s.gameStage=FARM_SEEDS_PITCH;s.farmSeedsPitchIdx=0}
+            consumeE()
+          }
+          // 5. Bloo pitches buying seeds — no funding decision this time, just go buy them
+          if(eDown&&!eUsed&&seedsPitchDialogue){
+            s.farmSeedsPitchIdx++
+            if(s.farmSeedsPitchIdx>=FARM_SEEDS_PITCH_LINES.length){s.gameStage=FARM_TO_MARKET_SEEDS}
+            consumeE()
+          }
+          // 6. Planting — press [Z] near any row to plant that whole row
+          if(eDown&&!eUsed&&s.gameStage===FARM_PLANTING){
+            for(let i=0;i<FARM_ROW_CENTERS.length;i++){
+              const rc=FARM_ROW_CENTERS[i]
+              if(!s.farmState.rowsPlanted[i]&&Math.hypot(s.px-rc.wx,s.py-rc.wy)<FARM_INTERACT){
+                const{state,success}=plantRow(s.farmState,i)
+                if(success){
+                  s.farmState=state
+                  if(s.farmState.rowsPlanted.every(Boolean))s.gameStage=FARM_HARVEST
+                }
+                consumeE()
+                break
+              }
+            }
+          }
+          // 7. Harvest & sell — press [Z] near any planted row to harvest it
+          if(eDown&&!eUsed&&s.gameStage===FARM_HARVEST){
+            for(let i=0;i<FARM_ROW_CENTERS.length;i++){
+              const rc=FARM_ROW_CENTERS[i]
+              if(!s.farmState.rowsHarvested[i]&&Math.hypot(s.px-rc.wx,s.py-rc.wy)<FARM_INTERACT){
+                const{state,coinsDelta,success}=harvestRow(s.farmState,i)
+                if(success){
+                  s.farmState=state;s.inventory.coins+=coinsDelta
+                  s.notifText=s.farmState.binkFeePerSale>0
+                    ?`🌾 Sold row ${i+1} for ${coinsDelta} coins... Bink quietly took ${s.farmState.binkFeePerSale}. So *that* was the "convenience fee."`
+                    :`🌾 Sold row ${i+1} for ${coinsDelta} coins!`
+                  s.notifTimer=260
+                  if(s.farmState.rowsHarvested.every(Boolean)){s.gameStage=FARM_WRAP_UP;s.farmWrapIdx=0}
+                }
+                consumeE()
+                break
+              }
+            }
+          }
+          // 8. Wrap-up dialogue
+          if(eDown&&!eUsed&&wrapDialogue){
+            s.farmWrapIdx++
+            if(s.farmWrapIdx>=FARM_WRAP_UP_LINES.length){
               s.gameStage=FARM_COMPLETE
               if(!s.completionCalled){s.completionCalled=true;completeRef.current?.()}
             }
+            consumeE()
+          }
+          // 9. open the sell menu near any NPC — income recovery any time after intro
+          if(eDown&&!eUsed&&s.gameStage>=FARM_TO_MARKET&&s.gameStage<FARM_COMPLETE&&s.sellMenu===null&&!marketIsOpen){
+            let nearNpcIdx=-1,nearNpcDist=Infinity
+            for(let i=0;i<s.npcs.length;i++){const d=Math.hypot(s.px-s.npcs[i].x,s.py-s.npcs[i].y);if(d<TS*2.5&&d<nearNpcDist){nearNpcDist=d;nearNpcIdx=i}}
+            if(nearNpcIdx>=0){
+              const npc=s.npcs[nearNpcIdx],maxSell=Math.min(combinedGoods(s.inventory),LB_NPC_MAX_TRADES-npc.tradesDone)
+              s.sellMenu={npcIdx:nearNpcIdx,amount:Math.min(1,maxSell),phase:"select",resultLine:"",earnedCoins:0};consumeE()
+            }
+          }
+          // 10. open the Market popup near the Market entrance during the seed-buying task
+          if(eDown&&!eUsed&&s.gameStage===FARM_TO_MARKET_SEEDS){
+            if(Math.hypot(s.px-ENTRANCES[4].wx,s.py-ENTRANCES[4].wy)<TS*2){setMarketOpen(true);consumeE()}
+          }
+          // 11. recap: Z near Bloo outside a live dialogue repeats his last line
+          if(eDown&&!eUsed&&nearBloo&&!blooDialogue&&!seedsPitchDialogue&&s.blooLastLine){
+            s.blooRecapOpen=!s.blooRecapOpen
             consumeE()
           }
 
@@ -1937,8 +2544,153 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
               const n=resolveMove(s.px,s.py,dx,dy)
               let nx=n.x,ny=n.y
               for(const fn of s.foliage){
-                const hr=fn.type==="tree"?TREE_HIT_R:BUSH_HIT_R
-                const hcy=fn.wy-(fn.type==="tree"?TREE_HIT_OY:BUSH_HIT_OY)
+                const hr=foliageHitR(fn.type)
+                const hcy=fn.wy-foliageHitOY(fn.type)
+                const ddx=nx-fn.wx,ddy=ny-hcy,dist=Math.hypot(ddx,ddy)
+                const minD=PLAYER_R+hr
+                if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
+              }
+              s.px=nx;s.py=ny
+            }
+          }
+
+        // ─────────────────────────────────────────────────────────────────
+        // LESSON FISH GAME FLOW (Lesson 5 — fishing income stream)
+        // ─────────────────────────────────────────────────────────────────
+        }else if(variant==="lessonFish"){
+          const blooDist=Math.hypot(s.px-s.bloo.x,s.py-s.bloo.y)
+          const nearBloo=blooDist<TS*2.5
+          if(!nearBloo)s.blooRecapOpen=false
+          const blooDialogue=nearBloo&&s.gameStage===FISH_TALK_BLOO
+          const talloDialogue=s.gameStage===FISH_TALLO_INTERRUPT
+          const wrapDialogue=s.gameStage===FISH_WRAP_UP
+          const scrollOpen=fishScrollRef.current!==null
+          const anyDialogue=blooDialogue||talloDialogue||wrapDialogue||s.blooRecapOpen||s.sellMenu!==null||scrollOpen
+
+          if(!blooDialogue)updateBloo(s.bloo,variant,s.gameStage,s.px,s.py)
+          updateNpcs(s.npcs,s.sellMenu?.npcIdx??-1)
+
+          const eDown=keys.has("z")||keys.has("Z")
+          let eUsed=false
+          const consumeE=()=>{eUsed=true;keys.delete("z");keys.delete("Z")}
+
+          // sell-menu arrow keys + close with [X] — income recovery if short on cash
+          if(s.sellMenu!==null&&s.sellMenu.phase==="select"){
+            const smNpc=s.npcs[s.sellMenu.npcIdx]
+            const maxSell=Math.min(combinedGoods(s.inventory),LB_NPC_MAX_TRADES-smNpc.tradesDone)
+            if(keys.has("ArrowRight")||keys.has("ArrowUp")){s.sellMenu.amount=Math.min(s.sellMenu.amount+1,maxSell);keys.delete("ArrowRight");keys.delete("ArrowUp")}
+            if(keys.has("ArrowLeft")||keys.has("ArrowDown")){s.sellMenu.amount=Math.max(s.sellMenu.amount-1,0);keys.delete("ArrowLeft");keys.delete("ArrowDown")}
+          }
+          if((keys.has("x")||keys.has("X"))&&s.sellMenu!==null&&s.sellMenu.phase==="select"){s.sellMenu=null;keys.delete("x");keys.delete("X")}
+
+          // 0. sell-menu confirm
+          if(eDown&&!eUsed&&s.sellMenu!==null){
+            if(s.sellMenu.phase==="result"){s.sellMenu=null}
+            else if(s.sellMenu.amount>0){
+              const smNpc=s.npcs[s.sellMenu.npcIdx],amt=s.sellMenu.amount
+              const alloc=sellAllocation(amt,s.inventory.berries,s.inventory.apples,s.inventory.wood,s.inventory.mushrooms)
+              let earned=sellEarnings(alloc,FLAT_SELL_PRICES)
+              const gettingTip=smNpc.isTipNpc&&!smNpc.tipUsed
+              if(gettingTip){earned+=LB_TIP_COINS;smNpc.tipUsed=true}
+              s.inventory.berries-=alloc.fromBerries;s.inventory.apples-=alloc.fromApples
+              s.inventory.wood-=alloc.fromWood;s.inventory.mushrooms-=alloc.fromMushrooms
+              s.inventory.coins+=earned
+              smNpc.tradesDone+=amt;if(smNpc.tradeTimer===0)smNpc.tradeTimer=LB_NPC_BUY_RESET
+              if(gettingTip){s.notifText=`Market Trader tipped you +${LB_TIP_COINS} coins! 🎉`;s.notifTimer=300}
+              s.sellMenu={npcIdx:s.sellMenu.npcIdx,amount:amt,phase:"result",resultLine:L1_NPC_SOLD[s.sellMenu.npcIdx],earnedCoins:earned}
+            }
+            consumeE()
+          }
+          // 1. Bloo intro — sends the player toward the Community Cottage/Market for gear
+          if(eDown&&!eUsed&&blooDialogue){
+            s.dialogIdx++
+            if(s.dialogIdx>=FISH_BLOO_INTRO.length){s.gameStage=FISH_TO_MARKET;s.dialogIdx=0}
+            consumeE()
+          }
+          // 2. Passing the Community Cottage — Tallo rolls up and interrupts
+          if(eDown&&!eUsed&&s.gameStage===FISH_TO_MARKET){
+            if(Math.hypot(s.px-ENTRANCES[2].wx,s.py-ENTRANCES[2].wy)<TS*2){
+              s.gameStage=FISH_TALLO_INTERRUPT;s.talloDialogIdx=0
+              consumeE()
+            }
+          }
+          // 3. Tallo's pitch — ends by opening the official rod-choice scroll
+          if(eDown&&!eUsed&&talloDialogue){
+            s.talloDialogIdx++
+            if(s.talloDialogIdx>=FISH_TALLO_INTERRUPT_LINES.length){s.gameStage=FISH_ROD_CHOICE;setFishScrollKind("rod")}
+            consumeE()
+          }
+          // 4. Buy bait at the Market
+          if(eDown&&!eUsed&&s.gameStage===FISH_BUY_BAIT&&!scrollOpen){
+            if(Math.hypot(s.px-ENTRANCES[4].wx,s.py-ENTRANCES[4].wy)<TS*2){
+              if(s.inventory.coins>=FISH_BAIT_COST){
+                s.inventory.coins-=FISH_BAIT_COST;s.fishBaitCans++
+                s.gameStage=FISH_TO_PIER
+              }else{
+                s.notifText="Not enough coins for bait — go sell some fish or berries!";s.notifTimer=240
+              }
+              consumeE()
+            }
+          }
+          // 5. Reach the pier
+          if(eDown&&!eUsed&&s.gameStage===FISH_TO_PIER){
+            if(Math.hypot(s.px-FISH_PIER_X,s.py-FISH_PIER_Y)<FISH_INTERACT){
+              s.gameStage=FISH_FISHING
+              consumeE()
+            }
+          }
+          // 6. Fishing casts — [Z] at the pier, one cast at a time
+          if(eDown&&!eUsed&&s.gameStage===FISH_FISHING){
+            if(Math.hypot(s.px-FISH_PIER_X,s.py-FISH_PIER_Y)<FISH_INTERACT){
+              if(s.fishRodBorrowed&&Math.random()<FISH_BORROW_SNAP_CHANCE){
+                s.fishRodSnapped=true
+                s.notifText="💥 The rod snapped! You lost that catch.";s.notifTimer=240
+                s.gameStage=FISH_WRAP_UP;s.fishWrapIdx=0
+              }else{
+                const[lo,hi]=s.fishRodBorrowed?[1,8]:[3,6]
+                const catchAmt=Math.floor(Math.random()*(hi-lo+1))+lo
+                s.inventory.coins+=catchAmt
+                s.fishCastsDone++
+                s.notifText=`🐟 Caught a fish worth ${catchAmt} coins!`;s.notifTimer=200
+                if(s.fishCastsDone>=FISH_CASTS_NEEDED){s.gameStage=FISH_WRAP_UP;s.fishWrapIdx=0}
+              }
+              consumeE()
+            }
+          }
+          // 7. Wrap-up dialogue
+          if(eDown&&!eUsed&&wrapDialogue){
+            const lines=fishWrapLines(s.fishRodBorrowed)
+            s.fishWrapIdx++
+            if(s.fishWrapIdx>=lines.length){
+              s.gameStage=FISH_COMPLETE
+              if(!s.completionCalled){s.completionCalled=true;completeRef.current?.()}
+            }
+            consumeE()
+          }
+          // 8. open the sell menu near any NPC — income recovery any time after intro
+          if(eDown&&!eUsed&&s.gameStage>=FISH_TO_MARKET&&s.gameStage<FISH_COMPLETE&&s.sellMenu===null&&!scrollOpen){
+            let nearNpcIdx=-1,nearNpcDist=Infinity
+            for(let i=0;i<s.npcs.length;i++){const d=Math.hypot(s.px-s.npcs[i].x,s.py-s.npcs[i].y);if(d<TS*2.5&&d<nearNpcDist){nearNpcDist=d;nearNpcIdx=i}}
+            if(nearNpcIdx>=0){
+              const npc=s.npcs[nearNpcIdx],maxSell=Math.min(combinedGoods(s.inventory),LB_NPC_MAX_TRADES-npc.tradesDone)
+              s.sellMenu={npcIdx:nearNpcIdx,amount:Math.min(1,maxSell),phase:"select",resultLine:"",earnedCoins:0};consumeE()
+            }
+          }
+          // 9. recap: Z near Bloo outside a live dialogue repeats his last line
+          if(eDown&&!eUsed&&nearBloo&&!blooDialogue&&s.blooLastLine){
+            s.blooRecapOpen=!s.blooRecapOpen
+            consumeE()
+          }
+
+          // movement
+          if(!s.dayOver&&s.gameStage<FISH_COMPLETE&&!anyDialogue){
+            const{dx,dy}=computeMoveDelta(keys,spd,s.pointerDown,s.px,s.py,s.pointerWX,s.pointerWY)
+            if(dx||dy){
+              const n=resolveMove(s.px,s.py,dx,dy)
+              let nx=n.x,ny=n.y
+              for(const fn of s.foliage){
+                const hr=foliageHitR(fn.type)
+                const hcy=fn.wy-foliageHitOY(fn.type)
                 const ddx=nx-fn.wx,ddy=ny-hcy,dist=Math.hypot(ddx,ddy)
                 const minD=PLAYER_R+hr
                 if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
@@ -1953,9 +2705,12 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
         if(!s.dayOver){
           s.drops=s.drops.filter(drop=>{
             if(Math.hypot(s.px-drop.wx,s.py-drop.wy)<TS*1.5){
-              s.inventory.berries+=drop.berries;s.inventory.coins+=drop.coins
+              s.inventory.berries+=drop.berries;s.inventory.apples+=drop.apples;s.inventory.coins+=drop.coins
+              if(drop.berries>0)claimInventorySlot(s.inventory,"berry")
+              if(drop.apples>0)claimInventorySlot(s.inventory,"apple")
               const parts:string[]=[]
-              if(drop.berries>0)parts.push(`🍒×${drop.berries}`)
+              if(drop.berries>0)parts.push(`🍓×${drop.berries}`)
+              if(drop.apples>0)parts.push(`🍎×${drop.apples}`)
               if(drop.coins>0)parts.push(`🪙×${drop.coins}`)
               if(parts.length>0){s.notifText=`Picked up ${parts.join(" ")}!`;s.notifTimer=150}
               return false
@@ -1972,7 +2727,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           if(s.ownedHouseIdx>=0&&s.ownedHouseIdx<ENTRANCES.length){
             s.px=ENTRANCES[s.ownedHouseIdx].wx;s.py=ENTRANCES[s.ownedHouseIdx].wy
           }else{
-            s.px=38*TS;s.py=22*TS
+            s.px=38*TS;s.py=21*TS
           }
           keys.clear()
         }
@@ -2003,6 +2758,9 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           }
         }
 
+        drawBiomDecor(ctx,camX,camY,cw,ch,imgs,s.logs)
+        drawBridges(ctx,camX,camY,imgs)
+
         if(variant==="lessonInvest"){
           drawPortDock(ctx,camX,camY)
           if(!s.boatGone)drawInvestBoat(ctx,LIV_BOAT_X,s.boatY,s.frame,camX,camY)
@@ -2010,11 +2768,17 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
 
         const npcMaxTrades=variant==="lesson1"?L1_NPC_MAX_TRADES:variant==="lessonInvest"?LIV_TRADES_NEEDED:LB_NPC_MAX_TRADES
         drawNpcs(ctx,s.npcs,camX,camY,npcMaxTrades)
-        if(variant==="lesson1")drawGovernor(ctx,s.gov,camX,camY,s.gameStage===L1_GOV_TAX&&s.govArrived)
+        if(variant==="lesson1"){
+          for(const stop of L1_TOUR_STOPS)drawTourStop(ctx,camX,camY,stop.x,stop.y,stop.label,stop.color,Math.hypot(s.px-stop.x,s.py-stop.y)<L1_TOUR_INTERACT)
+        }
         if(variant==="lessonFarm"){
-          drawFarmPlot(ctx,camX,camY,s.farmDigHits,imgs)
-          drawBinkMachine(ctx,camX,camY)
-          drawBink(ctx,camX,camY,Math.hypot(s.px-FARM_BINK_X,s.py-FARM_BINK_Y)<FARM_INTERACT)
+          drawFarmPlot(ctx,camX,camY,s.farmState.rowsPlanted,s.farmState.rowsHarvested,s.farmState.plotUnlocked,imgs)
+          if(s.gameStage<=FARM_RESOLVE_CLEARING)drawBink(ctx,camX,camY,s.gameStage===FARM_RESOLVE_CLEARING&&s.farmChosenRoute==="weeder"&&Math.hypot(s.px-FARM_BINK_X,s.py-FARM_BINK_Y)<FARM_INTERACT)
+        }
+        if(variant==="lessonFish"){
+          drawPortDock(ctx,camX,camY,"🎣 FISHING")
+          drawFishGearIcon(ctx,camX,camY,s.fishOwnsRod,s.fishRodBorrowed)
+          if(s.gameStage<=FISH_TALLO_INTERRUPT)drawTallo(ctx,camX,camY,false)
         }
         drawBloo(ctx,s.bloo,camX,camY,Math.hypot(s.px-s.bloo.x,s.py-s.bloo.y)<TS*2.5)
 
@@ -2027,14 +2791,27 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
         drawFoliage(ctx,fFront,camX,camY,cw,ch,imgs,nearFoliageNode)
         drawBuildings(ctx,camX,camY,cw,ch,imgs)
 
-        drawMinimap(ctx,s.px,s.py,cw)
-        drawTopBar(ctx,cw,s.sustenance,s.inventory,s.harvestCooldown,variant,s.gameStage,imgs)
+        // Task sign (left) and top bar (center) must never overlap. The top
+        // bar can always wrap its tabs into a single narrow column (down to
+        // ~90px), so that's reserved as its floor *before* the task sign is
+        // allowed to claim the rest of the width.
+        const GAP=8
+        const TOPBAR_MIN=100
+        const rightBoundary=cw-8
+        const taskRightLimit=Math.max(8+140,rightBoundary-GAP-TOPBAR_MIN)
+        s.foodBarRect=drawTopBar(ctx,cw,s.sustenance,s.inventory,s.harvestCooldown,variant,s.gameStage,imgs,taskRightLimit+GAP,rightBoundary)
 
         // task sign
         let taskLabel:string
         if(variant==="lesson1"){
-          const labels=["📍 Talk to Bloo — your guide",":berry: Harvest [Z] then eat [X] a berry","💬 Talk to Bloo again",`🪙 Sell berries [Z] — ${s.inventory.coins}/${L1_COIN_GOAL} coins`,"💬 Find Bloo near the Governor","⚠️ The Governor is here!","✅ Lesson complete!"]
-          taskLabel=labels[Math.min(s.gameStage,L1_COMPLETE)]
+          if(s.gameStage===L1_INTRO)taskLabel="📍 Talk to Bloo, your guide"
+          else if(s.gameStage===L1_HARVEST)taskLabel=":berry: Harvest [Z] then eat [X] a berry"
+          else if(s.gameStage===L1_TOUR)taskLabel="💬 Talk to Bloo about the town"
+          else if(s.gameStage===L1_FORAGE)taskLabel=`🧺 Collect ${L1_FORAGE_GOAL} items (${combinedGoods(s.inventory)}/${L1_FORAGE_GOAL})`
+          else if(s.gameStage===L1_SELL_INTRO)taskLabel="💬 Talk to Bloo at the Market"
+          else if(s.gameStage===L1_SELLING)taskLabel=`🪙 Sell everything [Z] — ${combinedGoods(s.inventory)} item${combinedGoods(s.inventory)===1?"":"s"} left`
+          else if(s.gameStage===L1_WRAP_UP)taskLabel="💬 Talk to Bloo"
+          else taskLabel="✅ Lesson complete!"
         }else if(variant==="lessonBudget"){
           const labels=["📍 Talk to Bloo","🏠 Press [Z] near a building to check the price","💬 Talk to Bloo — what is a budget?","✅ Lesson complete!"]
           taskLabel=labels[Math.min(s.gameStage,LB_COMPLETE)]
@@ -2042,21 +2819,43 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           const labels=["📍 Talk to Bloo","🏠 Press [Z] near a building to check the price","💬 Talk to Bloo again","🏦 Head to the blue building (the bank)","✅ Lesson complete!"]
           taskLabel=labels[Math.min(s.gameStage,LL_COMPLETE)]
         }else if(variant==="lessonInvest"){
-          const livLabels=["📍 Talk to Bloo — your guide","🚢 Watch the trade vessel depart",`🪙 Trade at the Port (${s.livTrades}/${LIV_TRADES_NEEDED}) — [Z] near dock`,"✅ Lesson complete!"]
+          const livLabels=["📍 Talk to Bloo, your guide","🚢 Watch the trade vessel depart",`🪙 Trade at the Port (${s.livTrades}/${LIV_TRADES_NEEDED}) — [Z] near dock`,"✅ Lesson complete!"]
           taskLabel=livLabels[Math.min(s.gameStage,LIV_COMPLETE)]
+        }else if(variant==="lessonFish"){
+          if(s.gameStage===FISH_TALK_BLOO)taskLabel="📍 Talk to Bloo, your guide"
+          else if(s.gameStage===FISH_TO_MARKET)taskLabel="📍 Head toward the Community Cottage"
+          else if(s.gameStage===FISH_TALLO_INTERRUPT)taskLabel="💬 Tallo is interrupting..."
+          else if(s.gameStage===FISH_ROD_CHOICE)taskLabel="📍 Make your choice"
+          else if(s.gameStage===FISH_BUY_BAIT)taskLabel=`📍 Buy bait at the Market (${FISH_BAIT_COST} coins)`
+          else if(s.gameStage===FISH_TO_PIER)taskLabel="📍 Head to the pier"
+          else if(s.gameStage===FISH_FISHING)taskLabel=`🎣 Fish at the pier (${stateRef.current.fishCastsDone}/${FISH_CASTS_NEEDED})`
+          else if(s.gameStage===FISH_WRAP_UP)taskLabel="💬 Talk to Bloo"
+          else taskLabel="✅ Lesson complete!"
         }else{
-          if(s.gameStage===FARM_TALK_BLOO)taskLabel="📍 Talk to Bloo — your guide"
-          else if(s.gameStage===FARM_FIND_BINK)taskLabel="📍 Find Bink and talk to him"
-          else if(s.gameStage===FARM_CHOICE)taskLabel="📍 Make your choice"
-          else if(s.gameStage===FARM_TASK_LOAN)taskLabel="📍 Go to the Savings Bank (Loan Cabin) and press [Z]"
-          else if(s.gameStage===FARM_TASK_MACHINE)taskLabel="📍 Use Bink's Fast-Cash machine — press [Z]"
-          else if(s.gameStage===FARM_TASK_DIG)taskLabel=`📍 Scatter berries at all 3 dig spots [Z] (${s.farmDigHits.filter(Boolean).length}/3)`
-          else if(s.gameStage===FARM_TRAP_OUTCOME||s.gameStage===FARM_PLANT_REVEAL)taskLabel="💬 Talk to Bloo"
+          const fs=stateRef.current.farmState
+          if(s.gameStage===FARM_TALK_BLOO)taskLabel="📍 Talk to Bloo, your guide"
+          else if(s.gameStage===FARM_TO_MARKET)taskLabel="📍 Head toward the Market"
+          else if(s.gameStage===FARM_BINK_INTERRUPT)taskLabel="💬 Bink is interrupting..."
+          else if(s.gameStage===FARM_CLEAR_CHOICE)taskLabel="📍 Make your choice"
+          else if(s.gameStage===FARM_RESOLVE_CLEARING)taskLabel=s.farmChosenRoute==="weeder"?"📍 Walk up to Bink":`📍 Head to the Market (${PEST_BUG_COST} coins)`
+          else if(s.gameStage===FARM_PLANT_REVEAL)taskLabel="💬 Talk to Bloo"
+          else if(s.gameStage===FARM_SEEDS_PITCH)taskLabel="💬 Talk to Bloo"
+          else if(s.gameStage===FARM_TO_MARKET_SEEDS)taskLabel=`📍 Buy seed packs at the Market (${fs.seedsOwned}/${SEEDS_NEEDED} seeds)`
+          else if(s.gameStage===FARM_PLANTING)taskLabel=`📍 Plant every row (${fs.rowsPlanted.filter(Boolean).length}/${FARM_PLOT_ROWS})`
+          else if(s.gameStage===FARM_HARVEST)taskLabel=`🌾 Harvest & sell every row (${fs.rowsHarvested.filter(Boolean).length}/${FARM_PLOT_ROWS})`
+          else if(s.gameStage===FARM_WRAP_UP)taskLabel="💬 Talk to Bloo"
           else taskLabel="✅ Lesson complete!"
         }
-        drawTaskSign(ctx,taskLabel,8,8,imgs)
-        drawInventoryPanel(ctx,s.inventory,8,90,imgs)
-        if(variant==="lessonInvest")drawLivInventory(ctx,8,136,s.livBread,s.livSeeds,s.livWood,s.livSeedTimer)
+        if(!freeplay)drawTaskSign(ctx,taskLabel,8,8,cw,imgs,taskRightLimit)
+        const invPanelH=inventoryPanelHeight(), invY=Math.round(ch/2-invPanelH/2)
+        s.inventoryPanelRect={x:8,y:invY}
+        const invDrag:InventoryDrag|null=s.invDragFromIndex!==null?{
+          fromIndex:s.invDragFromIndex,
+          overIndex:inventorySlotIndexAt(s.invDragPointerX,s.invDragPointerY,8,invY),
+          pointerX:s.invDragPointerX,pointerY:s.invDragPointerY,
+        }:null
+        drawInventoryPanel(ctx,s.inventory,8,invY,imgs,invDrag)
+        if(variant==="lessonInvest")drawLivInventory(ctx,8,invY+46,s.livBread,s.livSeeds,s.livWood,s.livSeedTimer,imgs)
 
         // ── Bottom prompts ────────────────────────────────────────────────
         // Skipped entirely while paused — a paused backdrop (e.g. behind the
@@ -2068,30 +2867,35 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           if(s.sellMenu!==null){
             const smNpc=s.npcs[s.sellMenu.npcIdx]
             drawSellMenu(ctx,cw,ch,NPC_NAMES[s.sellMenu.npcIdx],smNpc.color,s.sellMenu,
-              s.inventory.berries,LB_NPC_MAX_TRADES-smNpc.tradesDone,smNpc.isTipNpc,smNpc.tipUsed)
+              s.inventory.berries,s.inventory.apples,s.inventory.wood,s.inventory.mushrooms,LB_NPC_MAX_TRADES-smNpc.tradesDone,smNpc.isTipNpc,smNpc.tipUsed)
           }else if(s.houseSaleOpen&&s.houseSaleIdx>=0){
             drawHouseSaleMenu(ctx,cw,ch,s.houseSaleIdx,s.inventory.coins)
           }else if(bdNearBloo&&(s.gameStage===LB_INTRO||s.gameStage===LB_BLOO_BUDGET)){
             const lines=s.gameStage===LB_INTRO?LB_BLOO_INTRO:LB_BLOO_BUDGET_TALK
             const line=lines[Math.min(s.dialogIdx,lines.length-1)]
-            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.dialogIdx>=lines.length-1)
+            s.blooLastLine=line
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.dialogIdx>=lines.length-1,typeReveal(s,line))
+          }else if(s.blooRecapOpen&&s.blooLastLine){
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",s.blooLastLine,true)
           }else{
             let nearNpcForPrompt=-1,nDist=Infinity
             for(let i=0;i<s.npcs.length;i++){const d=Math.hypot(s.px-s.npcs[i].x,s.py-s.npcs[i].y);if(d<TS*2.5&&d<nDist){nDist=d;nearNpcForPrompt=i}}
-            if(nearNpcForPrompt>=0&&s.gameStage>=LB_EXPLORE&&s.gameStage<LB_COMPLETE){
+            if(bdNearBloo&&s.blooLastLine){
+              drawPrompt(ctx,cw,ch,"[Z] Ask Bloo to repeat that","#1e40af")
+            }else if(nearNpcForPrompt>=0&&s.gameStage>=LB_EXPLORE&&s.gameStage<LB_COMPLETE){
               const npc=s.npcs[nearNpcForPrompt];let msg:string
-              if(npc.tradesDone>=LB_NPC_MAX_TRADES)msg=`Full — comes back in ${Math.ceil(npc.tradeTimer/60)}s`
-              else if(s.inventory.berries===0)msg="No berries — harvest some first!"
+              if(npc.tradesDone>=LB_NPC_MAX_TRADES)msg=`Full, comes back in ${Math.ceil(npc.tradeTimer/60)}s`
+              else if(s.inventory.berries===0)msg="No berries, harvest some first!"
               else if(npc.isTipNpc)msg="[Z] Sell berries (+ possible tip!)"
               else msg="[Z] Sell berries"
               drawPrompt(ctx,cw,ch,msg,npc.tradesDone>=LB_NPC_MAX_TRADES||s.inventory.berries===0?"#dc2626":"#1e40af")
             }else if(s.gameStage===LB_EXPLORE){
               for(let ei=1;ei<ENTRANCES.length;ei++){
                 if(Math.hypot(s.px-ENTRANCES[ei].wx,s.py-ENTRANCES[ei].wy)<TS*2){
-                  drawPrompt(ctx,cw,ch,`[Z] Check price — ${ENTRANCES[ei].name}`,"#1e40af");break
+                  drawPrompt(ctx,cw,ch,`[Z] Check price: ${ENTRANCES[ei].name}`,"#1e40af");break
                 }
               }
-              if(nearFoliageNode){const fn=nearFoliageNode;const cdLeft=s.harvestCooldown>0?`  (${(s.harvestCooldown/60).toFixed(1)}s)`:"";drawPrompt(ctx,cw,ch,`[Z] Harvest ${fn.type==="tree"?"Tree":"Bush"} (+${HARVEST_BERRIES} berries)${cdLeft}`,s.harvestCooldown>0?"#94a3b8":"#1e40af")}
+              if(nearFoliageNode){const fn=nearFoliageNode;const cdLeft=s.harvestCooldown>0?`  (${(s.harvestCooldown/60).toFixed(1)}s)`:"";drawPrompt(ctx,cw,ch,`[Z] Harvest ${foliageLabel(fn.type)} (+${HARVEST_BERRIES} ${foliageItemName(fn.type)})${cdLeft}`,s.harvestCooldown>0?"#94a3b8":"#1e40af")}
             }
           }
         }else if(variant==="lessonLoans"){
@@ -2100,32 +2904,37 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           if(s.sellMenu!==null){
             const smNpc=s.npcs[s.sellMenu.npcIdx]
             drawSellMenu(ctx,cw,ch,NPC_NAMES[s.sellMenu.npcIdx],smNpc.color,s.sellMenu,
-              s.inventory.berries,LB_NPC_MAX_TRADES-smNpc.tradesDone,smNpc.isTipNpc,smNpc.tipUsed)
+              s.inventory.berries,s.inventory.apples,s.inventory.wood,s.inventory.mushrooms,LB_NPC_MAX_TRADES-smNpc.tradesDone,smNpc.isTipNpc,smNpc.tipUsed)
           }else if(s.houseSaleOpen&&s.houseSaleIdx>=0){
             drawHouseSaleMenu(ctx,cw,ch,s.houseSaleIdx,s.inventory.coins)
           }else if(llNearBloo&&(s.gameStage===LL_INTRO||s.gameStage===LL_BLOO_TALK)){
             const lines=s.gameStage===LL_INTRO?LL_BLOO_INTRO:LL_BLOO_LOAN
             const line=lines[Math.min(s.dialogIdx,lines.length-1)]
-            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.dialogIdx>=lines.length-1)
+            s.blooLastLine=line
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.dialogIdx>=lines.length-1,typeReveal(s,line))
           }else if(s.gameStage===LL_BANK){
             drawPrompt(ctx,cw,ch,"Head to the blue building in the center!","#1d4ed8")
+          }else if(s.blooRecapOpen&&s.blooLastLine){
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",s.blooLastLine,true)
           }else{
             let nearNpcForPrompt=-1,nDist=Infinity
             for(let i=0;i<s.npcs.length;i++){const d=Math.hypot(s.px-s.npcs[i].x,s.py-s.npcs[i].y);if(d<TS*2.5&&d<nDist){nDist=d;nearNpcForPrompt=i}}
-            if(nearNpcForPrompt>=0&&s.gameStage>=LL_EXPLORE&&s.gameStage<LL_BANK){
+            if(llNearBloo&&s.blooLastLine){
+              drawPrompt(ctx,cw,ch,"[Z] Ask Bloo to repeat that","#1e40af")
+            }else if(nearNpcForPrompt>=0&&s.gameStage>=LL_EXPLORE&&s.gameStage<LL_BANK){
               const npc=s.npcs[nearNpcForPrompt];let msg:string
-              if(npc.tradesDone>=LB_NPC_MAX_TRADES)msg=`Full — comes back in ${Math.ceil(npc.tradeTimer/60)}s`
-              else if(s.inventory.berries===0)msg="No berries — harvest some first!"
+              if(npc.tradesDone>=LB_NPC_MAX_TRADES)msg=`Full, comes back in ${Math.ceil(npc.tradeTimer/60)}s`
+              else if(s.inventory.berries===0)msg="No berries, harvest some first!"
               else if(npc.isTipNpc)msg="[Z] Sell berries (+ possible tip!)"
               else msg="[Z] Sell berries"
               drawPrompt(ctx,cw,ch,msg,npc.tradesDone>=LB_NPC_MAX_TRADES||s.inventory.berries===0?"#dc2626":"#1e40af")
             }else if(s.gameStage===LL_EXPLORE){
               for(let ei=1;ei<ENTRANCES.length;ei++){
                 if(Math.hypot(s.px-ENTRANCES[ei].wx,s.py-ENTRANCES[ei].wy)<TS*2){
-                  drawPrompt(ctx,cw,ch,`[Z] Check price — ${ENTRANCES[ei].name}`,"#1e40af");break
+                  drawPrompt(ctx,cw,ch,`[Z] Check price: ${ENTRANCES[ei].name}`,"#1e40af");break
                 }
               }
-              if(nearFoliageNode){const fn=nearFoliageNode;const cdLeft=s.harvestCooldown>0?`  (${(s.harvestCooldown/60).toFixed(1)}s)`:"";drawPrompt(ctx,cw,ch,`[Z] Harvest ${fn.type==="tree"?"Tree":"Bush"} (+${HARVEST_BERRIES} berries)${cdLeft}`,s.harvestCooldown>0?"#94a3b8":"#1e40af")}
+              if(nearFoliageNode){const fn=nearFoliageNode;const cdLeft=s.harvestCooldown>0?`  (${(s.harvestCooldown/60).toFixed(1)}s)`:"";drawPrompt(ctx,cw,ch,`[Z] Harvest ${foliageLabel(fn.type)} (+${HARVEST_BERRIES} ${foliageItemName(fn.type)})${cdLeft}`,s.harvestCooldown>0?"#94a3b8":"#1e40af")}
             }
           }
         }else if(variant==="lesson1"){
@@ -2134,37 +2943,42 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           if(s.sellMenu!==null){
             const smNpc=s.npcs[s.sellMenu.npcIdx]
             drawSellMenu(ctx,cw,ch,NPC_NAMES[s.sellMenu.npcIdx],smNpc.color,s.sellMenu,
-              s.inventory.berries,L1_NPC_MAX_TRADES-smNpc.tradesDone,smNpc.isTipNpc,smNpc.tipUsed)
+              s.inventory.berries,s.inventory.apples,s.inventory.wood,s.inventory.mushrooms,L1_NPC_MAX_TRADES-smNpc.tradesDone,smNpc.isTipNpc,smNpc.tipUsed,L1_SELL_PRICES)
           }else if(nearBloo&&s.gameStage===L1_HARVEST&&!s.blooHarvestDismissed){
             const line=L1_BLOO_HARVEST_REMIND[s.blooRemindIdx%L1_BLOO_HARVEST_REMIND.length]
-            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,true)
-          }else if(nearBloo&&(s.gameStage===L1_INTRO||s.gameStage===L1_SELL_INTRO||s.gameStage===L1_GROSS_TALK)){
-            const lines=s.gameStage===L1_INTRO?L1_BLOO_INTRO:s.gameStage===L1_SELL_INTRO?L1_BLOO_SELL:L1_BLOO_GROSS
+            s.blooLastLine=line
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,true,typeReveal(s,line))
+          }else if(nearBloo&&(s.gameStage===L1_INTRO||s.gameStage===L1_TOUR||s.gameStage===L1_SELL_INTRO||s.gameStage===L1_WRAP_UP)){
+            const lines=s.gameStage===L1_INTRO?L1_BLOO_INTRO:s.gameStage===L1_TOUR?L1_BLOO_TOUR:s.gameStage===L1_SELL_INTRO?L1_BLOO_SELL_INTRO:L1_BLOO_WRAP_UP
             const line=lines[Math.min(s.dialogIdx,lines.length-1)]
-            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.dialogIdx>=lines.length-1)
-          }else if(s.gameStage===L1_GOV_TAX&&s.govArrived){
-            drawDialogBox(ctx,cw,ch,"The Governor","#f59e0b",L1_GOV_TAX_LINE,true)
-            drawPrompt(ctx,cw,ch,`[Z] Accept  (−${s.govTaxAmount} coins)`,"#d97706")
-          }else if(s.gameStage===L1_GOV_TAX&&!s.govArrived){
-            drawPrompt(ctx,cw,ch,"The Governor is approaching…","#ea580c")
+            s.blooLastLine=line
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.dialogIdx>=lines.length-1,typeReveal(s,line))
+          }else if(s.blooRecapOpen&&s.blooLastLine){
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",s.blooLastLine,true)
           }else{
             let nearNpcForPrompt=-1,nDist=Infinity
             for(let i=0;i<s.npcs.length;i++){
               const d=Math.hypot(s.px-s.npcs[i].x,s.py-s.npcs[i].y)
               if(d<TS*2.5&&d<nDist){nDist=d;nearNpcForPrompt=i}
             }
-            if(nearNpcForPrompt>=0&&s.gameStage>=L1_SELLING&&s.gameStage<L1_GROSS_TALK){
+            let nearTourStop:typeof L1_TOUR_STOPS[number]|null=null
+            for(const stop of L1_TOUR_STOPS)if(Math.hypot(s.px-stop.x,s.py-stop.y)<L1_TOUR_INTERACT){nearTourStop=stop;break}
+            if(nearBloo&&s.blooLastLine){
+              drawPrompt(ctx,cw,ch,"[Z] Ask Bloo to repeat that","#1e40af")
+            }else if(nearTourStop){
+              drawPrompt(ctx,cw,ch,`[Z] Read the ${nearTourStop.label} sign`,nearTourStop.color)
+            }else if(nearNpcForPrompt>=0&&s.gameStage===L1_SELLING){
               const npc=s.npcs[nearNpcForPrompt]
               let msg:string
-              if(npc.tradesDone>=L1_NPC_MAX_TRADES)msg=`Full — comes back in ${Math.ceil(npc.tradeTimer/60)}s`
-              else if(s.inventory.berries===0)msg="No berries — go harvest some first!"
-              else if(npc.isTipNpc)msg="[Z] Sell berries (+ possible tip!)"
-              else msg="[Z] Sell berries"
-              drawPrompt(ctx,cw,ch,msg,npc.tradesDone>=L1_NPC_MAX_TRADES||s.inventory.berries===0?"#dc2626":"#1e40af")
+              if(npc.tradesDone>=L1_NPC_MAX_TRADES)msg=`Full, comes back in ${Math.ceil(npc.tradeTimer/60)}s`
+              else if(combinedGoods(s.inventory)===0)msg="Nothing left to sell — you're all done!"
+              else if(npc.isTipNpc)msg="[Z] Sell items (+ possible bonus!)"
+              else msg="[Z] Sell items"
+              drawPrompt(ctx,cw,ch,msg,npc.tradesDone>=L1_NPC_MAX_TRADES||combinedGoods(s.inventory)===0?"#dc2626":"#1e40af")
             }else if(nearFoliageNode&&s.gameStage>=L1_HARVEST){
               const fn=nearFoliageNode
               const cdLeft=s.harvestCooldown>0?`  (${(s.harvestCooldown/60).toFixed(1)}s)`:""
-              drawPrompt(ctx,cw,ch,`[Z] Harvest ${fn.type==="tree"?"Tree":"Bush"} (+${HARVEST_BERRIES} berries)${cdLeft}`,s.harvestCooldown>0?"#94a3b8":"#1e40af")
+              drawPrompt(ctx,cw,ch,`[Z] Harvest ${foliageLabel(fn.type)} (+${HARVEST_BERRIES} ${foliageItemName(fn.type)})${cdLeft}`,s.harvestCooldown>0?"#94a3b8":"#1e40af")
             }else{
               for(const e of ENTRANCES)if(Math.hypot(s.px-e.wx,s.py-e.wy)<TS*1.8){drawPrompt(ctx,cw,ch,`Press [Z] to enter ${e.name}`,"#1e40af");break}
             }
@@ -2176,10 +2990,16 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           const livNearPort=livPortNpc?Math.hypot(s.px-livPortNpc.x,s.py-livPortNpc.y)<TS*2.5:false
           const livNearMarket=Math.hypot(s.px-ENTRANCES[4].wx,s.py-ENTRANCES[4].wy)<TS*2.5
           if(s.livTradeMenu){
-            drawLivTradeMenu(ctx,cw,ch,s.inventory.berries,s.livTradeMenuIdx,s.livBread,s.livSeeds,s.livWood)
+            drawLivTradeMenu(ctx,cw,ch,s.inventory.berries,s.livTradeMenuIdx,s.livBread,s.livSeeds,s.livWood,imgs)
           }else if(livNearBloo&&(s.gameStage===LIV_INTRO||s.gameStage===LIV_BOAT)){
             const lines=s.gameStage===LIV_INTRO?LIV_BLOO_INTRO:LIV_BLOO_BOAT
-            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",lines[Math.min(s.dialogIdx,lines.length-1)],s.dialogIdx>=lines.length-1)
+            const line=lines[Math.min(s.dialogIdx,lines.length-1)]
+            s.blooLastLine=line
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.dialogIdx>=lines.length-1,typeReveal(s,line))
+          }else if(s.blooRecapOpen&&s.blooLastLine){
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",s.blooLastLine,true)
+          }else if(livNearBloo&&s.blooLastLine){
+            drawPrompt(ctx,cw,ch,"[Z] Ask Bloo to repeat that","#1e40af")
           }else if(s.livWood>0&&livNearMarket&&s.gameStage===LIV_TRADE){
             drawPrompt(ctx,cw,ch,`[Z] Sell ${s.livWood} wood → +${s.livWood*LIV_WOOD_COINS} coins`,"#065f46")
           }else if(livNearPort&&s.gameStage===LIV_TRADE){
@@ -2190,43 +3010,119 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           }else if(nearFoliageNode&&s.gameStage===LIV_TRADE){
             const fn=nearFoliageNode
             const cdLeft=s.harvestCooldown>0?`  (${(s.harvestCooldown/60).toFixed(1)}s)`:""
-            drawPrompt(ctx,cw,ch,`[Z] Harvest ${fn.type==="tree"?"Tree":"Bush"} (+${HARVEST_BERRIES} berries)${cdLeft}`,s.harvestCooldown>0?"#94a3b8":"#1e40af")
+            drawPrompt(ctx,cw,ch,`[Z] Harvest ${foliageLabel(fn.type)} (+${HARVEST_BERRIES} ${foliageItemName(fn.type)})${cdLeft}`,s.harvestCooldown>0?"#94a3b8":"#1e40af")
           }
         }else if(variant==="lessonFarm"){
           const farmBlooDist=Math.hypot(s.px-s.bloo.x,s.py-s.bloo.y)
           const farmNearBloo=farmBlooDist<TS*2.5
-          const farmNearBink=Math.hypot(s.px-FARM_BINK_X,s.py-FARM_BINK_Y)<FARM_INTERACT
           const plant=s.farmState.assignedPlant?PLANT_REGISTRY[s.farmState.assignedPlant]:null
-          if(farmNearBloo&&s.gameStage===FARM_TALK_BLOO){
+          if(s.sellMenu!==null){
+            const smNpc=s.npcs[s.sellMenu.npcIdx]
+            drawSellMenu(ctx,cw,ch,NPC_NAMES[s.sellMenu.npcIdx],smNpc.color,s.sellMenu,
+              s.inventory.berries,s.inventory.apples,s.inventory.wood,s.inventory.mushrooms,LB_NPC_MAX_TRADES-smNpc.tradesDone,smNpc.isTipNpc,smNpc.tipUsed)
+          }else if(marketOpen){
+            // The React FarmMarket overlay is on top — no canvas UI underneath.
+          }else if(farmNearBloo&&s.gameStage===FARM_TALK_BLOO){
             const line=FARM_BLOO_INTRO[Math.min(s.dialogIdx,FARM_BLOO_INTRO.length-1)]
-            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.dialogIdx>=FARM_BLOO_INTRO.length-1)
-          }else if(farmNearBink&&s.gameStage===FARM_FIND_BINK){
-            const line=FARM_BINK_INTRO[Math.min(s.binkDialogIdx,FARM_BINK_INTRO.length-1)]
-            drawDialogBox(ctx,cw,ch,"Bink","#a855f7",line,s.binkDialogIdx>=FARM_BINK_INTRO.length-1)
-          }else if(s.gameStage===FARM_CHOICE){
-            drawChoiceDialogBox(ctx,cw,ch,"Bink","#a855f7","What will you do next?",PHASE_1_CONTENT.choices,s.farmChoiceIdx)
-          }else if(s.gameStage===FARM_TASK_LOAN){
-            if(Math.hypot(s.px-ENTRANCES[2].wx,s.py-ENTRANCES[2].wy)<TS*2)drawPrompt(ctx,cw,ch,FARM_LOAN_LINE,"#1e40af")
-            else drawPrompt(ctx,cw,ch,"Head to the Savings Bank (west side of town)","#64748b")
-          }else if(s.gameStage===FARM_TASK_MACHINE){
-            if(farmNearBink)drawPrompt(ctx,cw,ch,FARM_MACHINE_LINE,"#c2410c")
-            else drawPrompt(ctx,cw,ch,"Walk back to Bink's machine","#64748b")
-          }else if(s.gameStage===FARM_TASK_DIG){
-            drawPrompt(ctx,cw,ch,FARM_DIG_LINE,"#4a3118")
-          }else if(s.gameStage===FARM_TRAP_OUTCOME){
-            const lines=farmTrapLines(s.farmState)
-            const line=lines[Math.min(s.dialogIdx,lines.length-1)]
-            drawDialogBox(ctx,cw,ch,"Bink","#a855f7",line,s.dialogIdx>=lines.length-1)
+            s.blooLastLine=line
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.dialogIdx>=FARM_BLOO_INTRO.length-1,typeReveal(s,line))
+          }else if(s.gameStage===FARM_TO_MARKET){
+            if(Math.hypot(s.px-ENTRANCES[4].wx,s.py-ENTRANCES[4].wy)<TS*2.5)drawPrompt(ctx,cw,ch,"[Z] Check the Market's gear prices","#1e40af")
+            else drawPrompt(ctx,cw,ch,"Head toward the Market (south-east side of town)","#64748b")
+          }else if(s.gameStage===FARM_BINK_INTERRUPT){
+            const idx=Math.min(s.binkDialogIdx,FARM_BINK_INTERRUPT_LINES.length-1)
+            const line=FARM_BINK_INTERRUPT_LINES[idx],speaker=FARM_BINK_INTERRUPT_SPEAKERS[idx]
+            drawDialogBox(ctx,cw,ch,speaker,speaker==="Bloo"?"#3b82f6":"#a855f7",line,idx>=FARM_BINK_INTERRUPT_LINES.length-1,typeReveal(s,line))
+          }else if(s.gameStage===FARM_CLEAR_CHOICE){
+            drawChoiceDialogBox(ctx,cw,ch,"Bink","#a855f7",FARM_CLEAR_CHOICE_PROMPT,FARM_CLEAR_CHOICE_OPTIONS,s.farmChoiceIdx)
+          }else if(s.gameStage===FARM_RESOLVE_CLEARING){
+            if(s.farmChosenRoute==="weeder"){
+              if(Math.hypot(s.px-FARM_BINK_X,s.py-FARM_BINK_Y)<FARM_INTERACT)drawPrompt(ctx,cw,ch,"[Z] Use Bink's Quick-Zap Weeder","#a855f7")
+              else drawPrompt(ctx,cw,ch,"Walk up to Bink","#64748b")
+            }else{
+              if(Math.hypot(s.px-ENTRANCES[4].wx,s.py-ENTRANCES[4].wy)<TS*2)drawPrompt(ctx,cw,ch,`[Z] Buy Pest-Bugs (${PEST_BUG_COST} coins)`,"#065f46")
+              else drawPrompt(ctx,cw,ch,"Head to the Market","#64748b")
+            }
           }else if(s.gameStage===FARM_PLANT_REVEAL){
             const lines=plant?plantRevealLines(plant):["Let's get that plot growing!"]
             const line=lines[Math.min(s.farmRevealIdx,lines.length-1)]
-            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.farmRevealIdx>=lines.length-1)
+            s.blooLastLine=line
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.farmRevealIdx>=lines.length-1,typeReveal(s,line))
+          }else if(s.gameStage===FARM_SEEDS_PITCH){
+            const line=FARM_SEEDS_PITCH_LINES[Math.min(s.farmSeedsPitchIdx,FARM_SEEDS_PITCH_LINES.length-1)]
+            s.blooLastLine=line
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.farmSeedsPitchIdx>=FARM_SEEDS_PITCH_LINES.length-1,typeReveal(s,line))
+          }else if(s.gameStage===FARM_TO_MARKET_SEEDS){
+            if(Math.hypot(s.px-ENTRANCES[4].wx,s.py-ENTRANCES[4].wy)<TS*2)drawPrompt(ctx,cw,ch,"[Z] Open the Market","#065f46")
+            else drawPrompt(ctx,cw,ch,`Buy seed packs at the Market (${s.farmState.seedsOwned}/${SEEDS_NEEDED} seeds)`,"#64748b")
+          }else if(s.gameStage===FARM_PLANTING){
+            let onRow=-1
+            for(let i=0;i<FARM_ROW_CENTERS.length;i++){if(!s.farmState.rowsPlanted[i]&&Math.hypot(s.px-FARM_ROW_CENTERS[i].wx,s.py-FARM_ROW_CENTERS[i].wy)<FARM_INTERACT){onRow=i;break}}
+            if(onRow>=0)drawPrompt(ctx,cw,ch,`[Z] Plant row ${onRow+1}`,"#166534")
+            else drawPrompt(ctx,cw,ch,`Walk onto an unplanted row and press [Z] (${s.farmState.rowsPlanted.filter(Boolean).length}/${FARM_PLOT_ROWS} planted)`,"#64748b")
+          }else if(s.gameStage===FARM_HARVEST){
+            let onRow=-1
+            for(let i=0;i<FARM_ROW_CENTERS.length;i++){if(!s.farmState.rowsHarvested[i]&&Math.hypot(s.px-FARM_ROW_CENTERS[i].wx,s.py-FARM_ROW_CENTERS[i].wy)<FARM_INTERACT){onRow=i;break}}
+            if(onRow>=0)drawPrompt(ctx,cw,ch,`[Z] Harvest & sell row ${onRow+1}`,"#a16207")
+            else drawPrompt(ctx,cw,ch,`Walk onto a planted row and press [Z] (${s.farmState.rowsHarvested.filter(Boolean).length}/${FARM_PLOT_ROWS} sold)`,"#64748b")
+          }else if(s.gameStage===FARM_WRAP_UP){
+            const line=FARM_WRAP_UP_LINES[Math.min(s.farmWrapIdx,FARM_WRAP_UP_LINES.length-1)]
+            s.blooLastLine=line
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.farmWrapIdx>=FARM_WRAP_UP_LINES.length-1,typeReveal(s,line))
+          }else if(s.blooRecapOpen&&s.blooLastLine){
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",s.blooLastLine,true)
+          }else if(farmNearBloo&&s.blooLastLine){
+            drawPrompt(ctx,cw,ch,"[Z] Ask Bloo to repeat that","#1e40af")
+          }
+        }else if(variant==="lessonFish"){
+          const fishBlooDist=Math.hypot(s.px-s.bloo.x,s.py-s.bloo.y)
+          const fishNearBloo=fishBlooDist<TS*2.5
+          const fishScrollShowing=fishScroll!==null
+          if(s.sellMenu!==null){
+            const smNpc=s.npcs[s.sellMenu.npcIdx]
+            drawSellMenu(ctx,cw,ch,NPC_NAMES[s.sellMenu.npcIdx],smNpc.color,s.sellMenu,
+              s.inventory.berries,s.inventory.apples,s.inventory.wood,s.inventory.mushrooms,LB_NPC_MAX_TRADES-smNpc.tradesDone,smNpc.isTipNpc,smNpc.tipUsed)
+          }else if(fishScrollShowing){
+            // The React StoryScroll overlay is on top — no canvas UI underneath.
+          }else if(fishNearBloo&&s.gameStage===FISH_TALK_BLOO){
+            const line=FISH_BLOO_INTRO[Math.min(s.dialogIdx,FISH_BLOO_INTRO.length-1)]
+            s.blooLastLine=line
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",line,s.dialogIdx>=FISH_BLOO_INTRO.length-1,typeReveal(s,line))
+          }else if(s.gameStage===FISH_TO_MARKET){
+            drawPrompt(ctx,cw,ch,"Head toward the Community Cottage to check gear prices","#64748b")
+          }else if(s.gameStage===FISH_TALLO_INTERRUPT){
+            const line=FISH_TALLO_INTERRUPT_LINES[Math.min(s.talloDialogIdx,FISH_TALLO_INTERRUPT_LINES.length-1)]
+            drawDialogBox(ctx,cw,ch,"Tallo","#0ea5e9",line,s.talloDialogIdx>=FISH_TALLO_INTERRUPT_LINES.length-1,typeReveal(s,line))
+          }else if(s.gameStage===FISH_BUY_BAIT){
+            if(Math.hypot(s.px-ENTRANCES[4].wx,s.py-ENTRANCES[4].wy)<TS*2)drawPrompt(ctx,cw,ch,`[Z] Buy a can of bait (${FISH_BAIT_COST} coins)`,"#065f46")
+            else drawPrompt(ctx,cw,ch,`Head to the Market and buy bait (${FISH_BAIT_COST} coins)`,"#64748b")
+          }else if(s.gameStage===FISH_TO_PIER){
+            if(Math.hypot(s.px-FISH_PIER_X,s.py-FISH_PIER_Y)<FISH_INTERACT)drawPrompt(ctx,cw,ch,"[Z] Start fishing","#0369a1")
+            else drawPrompt(ctx,cw,ch,"Head to the pier","#64748b")
+          }else if(s.gameStage===FISH_FISHING){
+            if(Math.hypot(s.px-FISH_PIER_X,s.py-FISH_PIER_Y)<FISH_INTERACT)drawPrompt(ctx,cw,ch,`[Z] Cast your line (${s.fishCastsDone}/${FISH_CASTS_NEEDED})`,"#0369a1")
+            else drawPrompt(ctx,cw,ch,"Walk onto the pier to fish","#64748b")
+          }else if(s.gameStage===FISH_WRAP_UP){
+            const lines=fishWrapLines(s.fishRodBorrowed)
+            const line=lines[Math.min(s.fishWrapIdx,lines.length-1)]
+            const speaker=s.fishRodBorrowed&&s.fishWrapIdx>=lines.length-1?"Tallo":"Bloo"
+            const color=speaker==="Tallo"?"#0ea5e9":"#3b82f6"
+            s.blooLastLine=line
+            drawDialogBox(ctx,cw,ch,speaker,color,line,s.fishWrapIdx>=lines.length-1,typeReveal(s,line))
+          }else if(s.blooRecapOpen&&s.blooLastLine){
+            drawDialogBox(ctx,cw,ch,"Bloo","#3b82f6",s.blooLastLine,true)
+          }else if(fishNearBloo&&s.blooLastLine){
+            drawPrompt(ctx,cw,ch,"[Z] Ask Bloo to repeat that","#1e40af")
           }
         }
 
         // ── Shared overlays ───────────────────────────────────────────────
         if(s.notifTimer>0)drawNotifBanner(ctx,cw,ch,s.notifText,Math.min(1,s.notifTimer/40))
         if(s.dayOver)drawDayOver(ctx,cw,ch,s.deathDropped,s.deathLost)
+
+        // A tapped-in virtual press only ever counts for this one frame.
+        if(tapInjected){keys.delete("z");keys.delete("r")}
+        if(foodTapInjected)keys.delete("x")
 
         s.raf=requestAnimationFrame(loop)
       }
@@ -2262,18 +3158,18 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           </h1>
           <p className="text-gray-500 text-base max-w-xs">
             {isL1
-              ? "The Governor took his 10% cut — that's income tax in action."
+              ? "Foraging is your first income source — now you know how coins flow through the island!"
               : isLoans
                 ? "You saw how much things cost — that's why budgeting matters. Track what you earn and spend!"
                 : isInvest
                   ? "You traded at the Island Port! Markets connect places that each have something the other needs."
                   : "You discovered you need a loan! Time to visit the bank and learn how loans work."}
           </p>
-          <div className="bg-yellow-50 border border-yellow-300 rounded-xl px-8 py-4 text-xl font-semibold text-yellow-700">
-            🪙 Coins earned: {finalCoins}
+          <div className="bg-yellow-50 border border-yellow-300 rounded-xl px-8 py-4 text-xl font-semibold text-yellow-700 flex items-center gap-1.5">
+            <img src="/coin.svg" alt="" className="w-5 h-5" /> Coins earned: {finalCoins}
           </div>
           <p className="text-gray-400 text-sm">
-            {isL1?"Great work out there, Berry Collector!":isLoans?"Great work exploring!":"On to the bank!"}
+            {isL1?"Great work out there, forager!":isLoans?"Great work exploring!":"On to the bank!"}
           </p>
           <button
             onClick={()=>router.push("/learn")}
@@ -2302,6 +3198,19 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
           className="absolute inset-0 bg-white pointer-events-none"
           style={{opacity:overlayOpacity,transition:"opacity 1.5s ease-in"}}
         />
+      )}
+      {variant==="lessonFarm"&&marketOpen&&(
+        <FarmMarket
+          coins={stateRef.current.inventory.coins}
+          seedsOwned={stateRef.current.farmState.seedsOwned}
+          assignedPlant={stateRef.current.farmState.assignedPlant}
+          onBuySeedPack={handleBuySeedPack}
+          onBuyBread={handleBuyBread}
+          onClose={()=>setMarketOpen(false)}
+        />
+      )}
+      {variant==="lessonFish"&&fishScroll==="rod"&&(
+        <StoryScroll data={fishRodScroll(stateRef.current.inventory.coins)} onChoose={handleFishScrollChoice} theme="blue" />
       )}
     </div>
   )

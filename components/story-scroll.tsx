@@ -14,11 +14,11 @@ export interface StoryScrollData {
   choices: StoryScrollChoice[]
 }
 
-/** All pastel — swap/extend freely as new CYOA branches get their own palette. */
+/** All pastel. Swap/extend freely as new CYOA branches get their own palette. */
 export type ScrollTheme = "neutral" | "green" | "blue" | "purple"
 
 const SCROLL_THEME_VARS: Record<ScrollTheme, Record<string, string>> = {
-  // Default tan parchment — matches the baseline scroll (Lesson 3/5 entry).
+  // Default tan parchment. Matches the baseline scroll (Lesson 3/5 entry).
   neutral: {
     "--scroll-parchment": "#ecd9ab",
     "--scroll-parchment-line": "rgba(107,64,32,0.05)",
@@ -31,7 +31,7 @@ const SCROLL_THEME_VARS: Record<ScrollTheme, Record<string, string>> = {
     "--scroll-icon-bg": "#bfa06e",
     "--scroll-text": "#2e1c0e",
   },
-  // Farming route — pastel sage green with a mossy brown-green outline.
+  // Farming route. Pastel sage green with a mossy brown-green outline.
   green: {
     "--scroll-parchment": "#dfe9cf",
     "--scroll-parchment-line": "rgba(58,74,46,0.06)",
@@ -44,7 +44,7 @@ const SCROLL_THEME_VARS: Record<ScrollTheme, Record<string, string>> = {
     "--scroll-icon-bg": "#aec495",
     "--scroll-text": "#33421f",
   },
-  // Fishing route — pastel sky blue.
+  // Fishing route. Pastel sky blue.
   blue: {
     "--scroll-parchment": "#d6e6ea",
     "--scroll-parchment-line": "rgba(35,63,72,0.06)",
@@ -57,7 +57,7 @@ const SCROLL_THEME_VARS: Record<ScrollTheme, Record<string, string>> = {
     "--scroll-icon-bg": "#9fc0c8",
     "--scroll-text": "#233f48",
   },
-  // Rumors route — pastel lavender, for the mystery/information theme.
+  // Rumors route. Pastel lavender, for the mystery/information theme.
   purple: {
     "--scroll-parchment": "#e3d9ea",
     "--scroll-parchment-line": "rgba(63,45,74,0.06)",
@@ -72,7 +72,7 @@ const SCROLL_THEME_VARS: Record<ScrollTheme, Record<string, string>> = {
   },
 }
 
-// Placeholder — swap in a real SFX (e.g. useAudio({ src: "/click.wav" })) once an asset exists.
+// Placeholder. Swap in a real SFX (e.g. useAudio({ src: "/click.wav" })) once an asset exists.
 function playClickSound() {}
 
 const UNROLL_MS = 550

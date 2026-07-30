@@ -14,7 +14,7 @@ const CoursesPage = async () => {
     const [courses, userProgress] = await Promise.all([coursesData, userProgressData])
 
     if (!userProgress?.activeCourse) {
-        // No active course yet — show page without sidebar
+        // No active course yet, show page without sidebar
         return (
             <div className="h-full max-w-[912px] px-3 mx-auto">
                 <h1 className="text-2xl font-bold text-neutral-700">Units</h1>

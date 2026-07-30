@@ -99,7 +99,7 @@ export function ProfilePicturePicker({ initialImage, initialBgColor }: Props) {
 
   return (
     <div className="flex flex-col lg:flex-row gap-8 w-full">
-      {/* LEFT 40% — live preview */}
+      {/* LEFT 40%, live preview */}
       <div className="flex flex-col items-center gap-4 lg:w-2/5 lg:sticky lg:top-8 lg:self-start">
         <div
           className="w-72 h-72 rounded-full flex items-center justify-center shadow-2xl ring-4 ring-white overflow-hidden"
@@ -110,9 +110,9 @@ export function ProfilePicturePicker({ initialImage, initialBgColor }: Props) {
         <p className="text-sm text-gray-400 italic text-center">Create your profile!</p>
       </div>
 
-      {/* RIGHT 60% — pickers */}
+      {/* RIGHT 60%, pickers */}
       <div className="flex flex-col gap-4 lg:w-3/5">
-        {/* Background color — native color picker */}
+        {/* Background color, native color picker */}
         <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Background Color</p>
         <div className="rounded-2xl border-2 border-gray-100 bg-white shadow-sm p-4 flex items-center gap-4">
           <label

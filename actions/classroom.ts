@@ -132,7 +132,7 @@ export const deleteClassroom = async (
     redirect("/classroom")
 }
 
-/** Same as joinClassroom but without the redirect — for use in the onboarding modal. */
+/** Same as joinClassroom but without the redirect, for use in the onboarding modal. */
 export const joinClassroomInline = async (
     rawCode: string,
     role: "student" | "other"
@@ -147,7 +147,7 @@ export const joinClassroomInline = async (
         where: eq(classrooms.code, code),
     })
 
-    if (!classroom) return { error: "Classroom not found — double-check the code!" }
+    if (!classroom) return { error: "Classroom not found. Double-check the code!" }
 
     const existing = await db.query.classroomMembers.findFirst({
         where: and(

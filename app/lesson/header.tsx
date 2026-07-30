@@ -21,8 +21,8 @@ export const Header = ({
                 className="text-slate-500 hover:opacity-75 transition cursor-pointer"
             />
             <Progress value={percentage} />
-            <div className="text-yellow-500 flex items-center font-bold">
-                🪙 {coins}
+            <div className="text-yellow-500 flex items-center gap-1 font-bold">
+                <img src="/coin.svg" alt="" className="w-5 h-5" /> {coins}
             </div>
         </header>
     )

@@ -90,7 +90,7 @@ const ProfilePage = async () => {
                 )}
             </div>
 
-            {/* Game Stats — only shown after job is chosen */}
+            {/* Game Stats, only shown after job is chosen */}
             {chosenJob?.job && (
                 <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
                     <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Game Stats</p>

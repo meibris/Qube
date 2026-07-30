@@ -138,7 +138,7 @@ export const userProgress = pgTable("user_progress", {
     tokens: integer("tokens").notNull().default(0),
     tokenRate: integer("token_rate").notNull().default(0),   // tokens earned per hour
     totalBerries: integer("total_berries").notNull().default(0),
-    jobStartedAt: text("job_started_at"),                    // ISO timestamp — set when minigame completes
+    jobStartedAt: text("job_started_at"),                    // ISO timestamp, set when minigame completes
     role: text("role"),                                       // 'teacher' | 'student' | 'other' | null
 })
 

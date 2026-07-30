@@ -230,7 +230,7 @@ export const ClassroomDashboard = ({ classroom, members, freshCode, onCreateNew,
                                         <span className="text-blue-500 font-semibold">
                                             {member.points ?? 0} XP
                                         </span>
-                                        <span className="text-neutral-500">—</span>
+                                        <span className="text-neutral-500">-</span>
                                         <span className="text-neutral-700 font-medium">
                                             {member.tokens ?? 0}
                                         </span>

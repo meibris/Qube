@@ -40,7 +40,7 @@ export async function saveMinigameCompleted() {
             })
             .where(eq(userProgress.userId, userId))
     } else {
-        // Replay: award 30% XP only — don't reset token clock or completion flag
+        // Replay: award 30% XP only; don't reset token clock or completion flag
         await db
             .update(userProgress)
             .set({ points: progress.points + REPEAT_XP })

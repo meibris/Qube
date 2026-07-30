@@ -104,7 +104,7 @@ export const LessonButton = ({
         if (!effectiveLocked && !effectiveCompletedLocked) router.push(href)
     }
 
-    // Completed custom lessons render as a static colored bubble — no link
+    // Completed custom lessons render as a static colored bubble, no link
     if (effectiveCompletedLocked) {
         return (
             <div

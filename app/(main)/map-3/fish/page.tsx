@@ -1,7 +1,23 @@
-import { BlankLessonClient } from "@/app/lesson/blank-lesson/client"
+import Link from "next/link"
+import { getInitialCoins, getPlayerColor } from "@/actions/game-lesson"
+import { GameMap } from "../../map/game-map"
 
-// Placeholder until the Coastal Fishing gameplay stream is built — see
-// lib/income-progression.ts STREAM_REGISTRY.fish.gameplayRoute.
-export default function Map3FishPage() {
-  return <BlankLessonClient lessonKey="fishGameplayCompleted" />
+export default async function Map3FishPage({ searchParams }: { searchParams: Promise<{ freeplay?: string }> }) {
+  const [[initialCoins, playerColor], { freeplay }] = await Promise.all([
+    Promise.all([getInitialCoins(), getPlayerColor()]),
+    searchParams,
+  ])
+  return (
+    <div className="fixed inset-0 z-50 bg-black">
+      <div className="relative w-full h-full">
+        <GameMap variant="lessonFish" initialCoins={initialCoins} playerColor={playerColor} freeplay={freeplay==="1"} />
+        <Link
+          href="/learn"
+          className="absolute bottom-4 left-4 px-4 py-2 rounded-xl bg-white text-slate-500 text-sm font-bold uppercase tracking-wide border-2 border-b-4 border-slate-200 hover:bg-slate-100 active:border-b-2 transition-colors shadow-lg"
+        >
+          ← Back to Learn
+        </Link>
+      </div>
+    </div>
+  )
 }

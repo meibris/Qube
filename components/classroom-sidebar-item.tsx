@@ -41,7 +41,7 @@ export const ClassroomSidebarItem = ({ classrooms }: Props) => {
                 }
             </Button>
 
-            {/* Dropdown list — scrollable so profile stays pinned */}
+            {/* Dropdown list, scrollable so profile stays pinned */}
             {open && (
                 <div className="flex flex-col gap-y-1 mt-1 pl-2 overflow-y-auto max-h-[260px] styled-scrollbar pr-1">
                     {classrooms.map((c) => (

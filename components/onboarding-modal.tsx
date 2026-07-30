@@ -194,7 +194,7 @@ export function OnboardingModal({ hasRole, hasCharacterData }: Props) {
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 flex flex-col gap-6">
         <div className="text-center">
           <h2 className="text-2xl font-extrabold text-slate-700">Pick your avatar! 🎨</h2>
-          <p className="text-slate-500 mt-2 text-sm">We picked one for you — keep it or choose your own.</p>
+          <p className="text-slate-500 mt-2 text-sm">We picked one for you. Keep it or choose your own.</p>
         </div>
 
         {/* Avatar preview */}

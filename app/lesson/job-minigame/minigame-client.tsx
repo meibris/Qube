@@ -10,6 +10,7 @@ import { Progress } from "@/components/ui/progress"
 import { useExitModal } from "@/store/use-exit-modal"
 import { saveMinigameCompleted } from "@/actions/minigame"
 import { ResultCard } from "../result-card"
+import { CoinIcon } from "@/components/coin-icon"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -772,8 +773,8 @@ export function MinigameClient({ jobName, jobIcon, playerImage, playerBgColor, c
                     className="text-slate-500 hover:opacity-75 transition cursor-pointer"
                 />
                 <Progress value={50} />
-                <div className="text-yellow-500 flex items-center font-bold">
-                    🪙 {coins}
+                <div className="text-yellow-500 flex items-center gap-1 font-bold">
+                    <CoinIcon /> {coins}
                 </div>
             </header>
 
@@ -845,8 +846,8 @@ export function MinigameClient({ jobName, jobIcon, playerImage, playerBgColor, c
                                 <div style={{ fontSize: 12, color: "#374151", marginBottom: 10 }}>
                                     First Shift Completed! 🎉
                                 </div>
-                                <div style={{ fontSize: 32, fontWeight: 900, color: "#d97706" }}>
-                                    🪙 {coinsEarned}
+                                <div style={{ fontSize: 32, fontWeight: 900, color: "#d97706", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                                    <CoinIcon /> {coinsEarned}
                                 </div>
                                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>coins earned</div>
                             </div>
@@ -955,7 +956,7 @@ export function MinigameClient({ jobName, jobIcon, playerImage, playerBgColor, c
                                 <span><strong>Arrow Keys / WASD</strong> to move in any direction</span>
                             </div>
                             <div className="flex items-center gap-3 text-sm text-gray-700">
-                                <span className="text-lg">🪙</span>
+                                <span className="text-lg"><CoinIcon /></span>
                                 <span><strong>Gold coins</strong> = regular wages &nbsp;|&nbsp; <strong>Blue coins</strong> = <strong>1.5× overtime pay!</strong></span>
                             </div>
                             <div className="flex items-center gap-3 text-sm text-gray-700">

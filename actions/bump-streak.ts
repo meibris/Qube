@@ -45,15 +45,15 @@ export async function bumpStreak() {
     let freezeUsedAt   = progress.freezeUsedAt
 
     if (missedDays <= 0) {
-        // Consecutive day — normal increment
+        // Consecutive day, normal increment
         newStreak = progress.streak + 1
     } else if (missedDays <= progress.streakFreezes) {
-        // Enough freezes to cover every missed day — consume them, keep streak
+        // Enough freezes to cover every missed day, consume them, keep streak
         newFreezes   = progress.streakFreezes - missedDays
         freezeUsedAt = today
         // streak stays the same; lastStreakDate advances to today
     } else {
-        // Not enough freezes — consume all remaining, but streak still breaks
+        // Not enough freezes, consume all remaining, but streak still breaks
         newFreezes   = 0
         freezeUsedAt = missedDays > 0 && progress.streakFreezes > 0 ? today : freezeUsedAt
         newStreak    = 1

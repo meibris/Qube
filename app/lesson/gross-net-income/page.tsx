@@ -39,9 +39,9 @@ const QUIZ: { q: string; options: string[]; correct: number; explain: string }[]
     },
     {
         q: "The Market trader gave you a +2 coin tip for free. Is a tip part of your gross income?",
-        options: ["No — tips don't count", "Yes — all money you receive is income", "Only if it's more than 5 coins", "Only from employers"],
+        options: ["No, tips don't count", "Yes, all money you receive is income", "Only if it's more than 5 coins", "Only from employers"],
         correct: 1,
-        explain: "Yes! The IRS considers tips income. All money you earn or receive — wages, tips, freelance pay — counts toward gross income.",
+        explain: "Yes! The IRS considers tips income. All money you earn or receive, including wages, tips, and freelance pay, counts toward gross income.",
     },
 ]
 
@@ -76,7 +76,7 @@ export default function GrossNetIncomePage() {
             }
             instructions={
                 <>
-                    <p>You just played the island game. Let&apos;s break down what actually happened — in real financial terms.</p>
+                    <p>You just played the island game. Let&apos;s break down what actually happened, in real financial terms.</p>
                     <p className="mt-1 text-xs text-gray-500">Read through each section, then take the short quiz at the end.</p>
                 </>
             }
@@ -108,13 +108,13 @@ export default function GrossNetIncomePage() {
                         <div className="grid sm:grid-cols-2 gap-4">
                             <div className="rounded-2xl bg-amber-50 border-2 border-amber-200 p-5">
                                 <p className="text-xs font-bold uppercase tracking-widest text-amber-600 mb-1">Gross Income</p>
-                                <p className="text-2xl font-extrabold text-amber-700">🪙 20 coins</p>
+                                <p className="text-2xl font-extrabold text-amber-700 flex items-center gap-1.5"><img src="/coin.svg" alt="" className="w-6 h-6" /> 20 coins</p>
                                 <p className="text-sm text-amber-700 mt-2">All money earned <strong>before</strong> any deductions.</p>
                                 <p className="text-xs text-amber-600 mt-1">Also called: pre-tax income, total earnings</p>
                             </div>
                             <div className="rounded-2xl bg-green-50 border-2 border-green-200 p-5">
                                 <p className="text-xs font-bold uppercase tracking-widest text-green-600 mb-1">Net Income</p>
-                                <p className="text-2xl font-extrabold text-green-700">🪙 18 coins</p>
+                                <p className="text-2xl font-extrabold text-green-700 flex items-center gap-1.5"><img src="/coin.svg" alt="" className="w-6 h-6" /> 18 coins</p>
                                 <p className="text-sm text-green-700 mt-2">What you <strong>actually take home</strong> after deductions.</p>
                                 <p className="text-xs text-green-600 mt-1">Also called: take-home pay, after-tax income</p>
                             </div>
@@ -146,8 +146,8 @@ export default function GrossNetIncomePage() {
                 {/* ── INCOME TAX ────────────────────────────────────────────── */}
                 {section === "tax" && (
                     <div className="flex flex-col gap-5">
-                        <h2 className="text-xl font-bold text-gray-800">Income Tax — What Is It?</h2>
-                        <p className="text-gray-600">On the island, the Governor took 10% automatically. In real life, that&apos;s income tax — and it works the same way.</p>
+                        <h2 className="text-xl font-bold text-gray-800">Income Tax: What Is It?</h2>
+                        <p className="text-gray-600">On the island, the Governor took 10% automatically. In real life, that&apos;s income tax, and it works the same way.</p>
 
                         {[
                             {
@@ -156,11 +156,11 @@ export default function GrossNetIncomePage() {
                             },
                             {
                                 q: "Who collects it?",
-                                a: "Both the federal government (IRS) and most state governments collect income tax. Federal rates range from 10%–37% depending on how much you earn. State rates vary — some states have no income tax at all.",
+                                a: "Both the federal government (IRS) and most state governments collect income tax. Federal rates range from 10%–37% depending on how much you earn. State rates vary; some states have no income tax at all.",
                             },
                             {
                                 q: "How does withholding work?",
-                                a: "Your employer automatically deducts income tax from every paycheck before you even see it — just like the Governor walked up and took his cut. This is called withholding. At the end of the year, you file a tax return to settle up: if too much was withheld, you get a refund. If too little was withheld, you owe more.",
+                                a: "Your employer automatically deducts income tax from every paycheck before you even see it, just like the Governor walked up and took his cut. This is called withholding. At the end of the year, you file a tax return to settle up: if too much was withheld, you get a refund. If too little was withheld, you owe more.",
                             },
                             {
                                 q: "Is it just income tax that comes out?",
@@ -168,7 +168,7 @@ export default function GrossNetIncomePage() {
                             },
                             {
                                 q: "What's a tax bracket?",
-                                a: "The US uses a progressive tax system. You don't pay the same rate on every dollar — lower earnings are taxed at a lower rate, and higher earnings at a higher rate. For example, in 2024 the first ~$11,600 of income is taxed at 10%, the next chunk at 12%, and so on up to 37% for very high earners.",
+                                a: "The US uses a progressive tax system. You don't pay the same rate on every dollar: lower earnings are taxed at a lower rate, and higher earnings at a higher rate. For example, in 2024 the first ~$11,600 of income is taxed at 10%, the next chunk at 12%, and so on up to 37% for very high earners.",
                             },
                         ].map((item, i) => (
                             <div key={i} className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
@@ -196,7 +196,7 @@ export default function GrossNetIncomePage() {
                 {/* ── QUIZ ──────────────────────────────────────────────────── */}
                 {section === "quiz" && (
                     <div className="flex flex-col gap-6">
-                        <h2 className="text-xl font-bold text-gray-800">Quick Check — {score}/{QUIZ.length} correct</h2>
+                        <h2 className="text-xl font-bold text-gray-800">Quick Check: {score}/{QUIZ.length} correct</h2>
 
                         {QUIZ.map((q, qi) => (
                             <div key={qi} className="rounded-2xl border border-gray-200 bg-white shadow-sm p-5 flex flex-col gap-3">
@@ -232,12 +232,12 @@ export default function GrossNetIncomePage() {
                         {allAnswered && (
                             <div className={`rounded-2xl p-5 border-2 flex flex-col gap-3 ${allCorrect?"bg-green-50 border-green-200":"bg-blue-50 border-blue-200"}`}>
                                 <p className={`font-bold text-lg ${allCorrect?"text-green-800":"text-blue-800"}`}>
-                                    {allCorrect ? "🎉 Perfect score!" : `${score}/${QUIZ.length} — Good effort!`}
+                                    {allCorrect ? "🎉 Perfect score!" : `${score}/${QUIZ.length}: Good effort!`}
                                 </p>
                                 <p className={`text-sm ${allCorrect?"text-green-700":"text-blue-700"}`}>
                                     {allCorrect
                                         ? "You nailed gross income, net income, and income tax. On to the next lesson!"
-                                        : "Review the sections above if anything was tricky — then complete the lesson!"}
+                                        : "Review the sections above if anything was tricky, then complete the lesson!"}
                                 </p>
                                 <button
                                     onClick={handleComplete}

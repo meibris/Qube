@@ -4,7 +4,7 @@
  *
  * Run with:  npx tsx scripts/seed-all-units.ts
  *
- * Safe to run multiple times — uses INSERT … ON CONFLICT DO NOTHING.
+ * Safe to run multiple times; uses INSERT … ON CONFLICT DO NOTHING.
  */
 import "dotenv/config"
 import { sql } from "drizzle-orm"

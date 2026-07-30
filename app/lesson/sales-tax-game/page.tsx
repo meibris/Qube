@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { GameShell } from "@/components/game-shell"
 import { saveGameLesson } from "@/actions/game-lesson"
+import { CoinIcon } from "@/components/coin-icon"
 
 type Phase = "enter" | "shop" | "receipt" | "complete"
 
@@ -31,7 +32,7 @@ export default function SalesTaxGamePage() {
             instructions={
                 <>
                     <p>Head to the Market and buy some bread.</p>
-                    <p className="mt-1 text-xs text-gray-500">Pay close attention to the receipt — something unexpected happens at checkout!</p>
+                    <p className="mt-1 text-xs text-gray-500">Pay close attention to the receipt. Something unexpected happens at checkout!</p>
                 </>
             }
         >
@@ -45,7 +46,7 @@ export default function SalesTaxGamePage() {
                             <h2 className="text-2xl font-bold text-green-800 mb-3">Welcome to the Market!</h2>
                             <p className="text-green-700 text-sm leading-relaxed">
                                 You&apos;ve been working hard all day collecting berries and earning coins.
-                                Now it&apos;s time to restock — you need a loaf of bread to get through the week.
+                                Now it&apos;s time to restock; you need a loaf of bread to get through the week.
                             </p>
                             <p className="text-green-600 text-xs mt-3">The market is just ahead. Let&apos;s check the price on that bread...</p>
                         </div>
@@ -74,12 +75,12 @@ export default function SalesTaxGamePage() {
                                     <span className="text-5xl">🍞</span>
                                     <div>
                                         <p className="font-bold text-gray-800 text-base">Freshly Baked Bread</p>
-                                        <p className="text-gray-400 text-xs">1 loaf — feeds you for a week</p>
+                                        <p className="text-gray-400 text-xs">1 loaf. Feeds you for a week</p>
                                         <p className="text-green-600 text-xs font-medium mt-0.5">✓ In stock</p>
                                     </div>
                                 </div>
                                 <div className="text-right">
-                                    <p className="text-3xl font-extrabold text-amber-600">10 🪙</p>
+                                    <p className="text-3xl font-extrabold text-amber-600">10 <CoinIcon /></p>
                                     <p className="text-xs text-gray-400">listed price</p>
                                 </div>
                             </div>
@@ -97,7 +98,7 @@ export default function SalesTaxGamePage() {
                             onClick={() => setPhase("receipt")}
                             className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-base transition-all active:scale-95 shadow-md"
                         >
-                            [E] Buy Bread — 10 coins
+                            [E] Buy Bread. 10 coins
                         </button>
                     </div>
                 )}
@@ -114,17 +115,17 @@ export default function SalesTaxGamePage() {
                                 <div className="border-t border-dashed border-gray-300 pt-3 flex flex-col gap-2 text-sm">
                                     <div className="flex justify-between text-gray-700">
                                         <span>Bread × 1</span>
-                                        <span>10 🪙</span>
+                                        <span>10 <CoinIcon /></span>
                                     </div>
                                     <div className="flex justify-between font-bold text-red-500">
                                         <span>Sales Tax (10%)</span>
-                                        <span>+1 🪙</span>
+                                        <span>+1 <CoinIcon /></span>
                                     </div>
                                 </div>
 
                                 <div className="border-t-2 border-gray-700 mt-3 pt-3 flex justify-between font-extrabold text-gray-900 text-base">
                                     <span>TOTAL CHARGED</span>
-                                    <span>11 🪙</span>
+                                    <span>11 <CoinIcon /></span>
                                 </div>
 
                                 <p className="text-center text-gray-400 text-xs mt-3">Thank you for shopping!</p>
@@ -139,7 +140,7 @@ export default function SalesTaxGamePage() {
                         {/* Shock reaction */}
                         <div className="rounded-2xl bg-red-50 border-2 border-red-200 p-5 text-center w-full">
                             <p className="text-4xl mb-2">😱</p>
-                            <p className="font-bold text-red-800 text-lg">Wait — I thought it was 10 coins!</p>
+                            <p className="font-bold text-red-800 text-lg">Wait. I thought it was 10 coins!</p>
                             <p className="text-red-600 text-sm mt-1">
                                 The sign said <strong>10</strong>... but you were charged <strong>11</strong>.
                                 Where did that extra coin go?
@@ -163,7 +164,7 @@ export default function SalesTaxGamePage() {
                             <h2 className="text-xl font-bold text-blue-800 mb-2">That extra coin is called Sales Tax!</h2>
                             <p className="text-blue-700 text-sm leading-relaxed">
                                 Every time you <strong>buy</strong> something, the government silently adds a small
-                                percentage on top of the listed price. That extra amount is called <strong>sales tax</strong> —
+                                percentage on top of the listed price. That extra amount is called <strong>sales tax</strong>,
                                 and it gets sent straight to the government, not the shopkeeper.
                             </p>
                             <p className="text-blue-500 text-xs mt-3">
@@ -175,9 +176,9 @@ export default function SalesTaxGamePage() {
                         <div className="rounded-xl bg-gray-50 border border-gray-200 p-4 w-full">
                             <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">What you just experienced</p>
                             <div className="flex flex-col gap-1 text-sm">
-                                <div className="flex justify-between"><span className="text-gray-600">Listed price (what the sign says)</span><span className="font-bold">10 🪙</span></div>
-                                <div className="flex justify-between text-red-500"><span>Sales tax collected by government</span><span className="font-bold">+1 🪙</span></div>
-                                <div className="flex justify-between border-t border-gray-200 pt-1 mt-1"><span className="font-bold text-gray-800">What you actually paid</span><span className="font-extrabold text-gray-900">11 🪙</span></div>
+                                <div className="flex justify-between"><span className="text-gray-600">Listed price (what the sign says)</span><span className="font-bold">10 <CoinIcon /></span></div>
+                                <div className="flex justify-between text-red-500"><span>Sales tax collected by government</span><span className="font-bold">+1 <CoinIcon /></span></div>
+                                <div className="flex justify-between border-t border-gray-200 pt-1 mt-1"><span className="font-bold text-gray-800">What you actually paid</span><span className="font-extrabold text-gray-900">11 <CoinIcon /></span></div>
                             </div>
                         </div>
 

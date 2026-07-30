@@ -40,12 +40,12 @@ const LessonIdPage = async ({
 
             const INCOME_ROUTES: Record<number, string> = {
                 2: `/lesson/gross-net-income`,
-                3: `/map-3`,
-                4: "/lesson/job-minigame",
-                6: `/lesson/tax-brackets`,
-                7: "/lesson/disposable-discretionary",
-                8: `/lesson/blank-lesson?key=incomeSourcesCompleted`,
-                9: `/lesson/blank-lesson?key=annualMonthlyCompleted`,
+                3: `/map-3`,               // farm gameplay
+                4: "/lesson/job-minigame", // review
+                5: `/map-3/fish`,          // fishing gameplay
+                6: `/lesson/tax-brackets`, // review
+                7: "/map-3/rumors",        // rumors gameplay
+                8: "/lesson/disposable-discretionary", // review
             }
 
             if (INCOME_ROUTES[lesson.order]) {

@@ -4,7 +4,7 @@
  * (drops the old order-9 "Blank" row entirely).
  *
  * Unlike scripts/seed.ts, this does NOT touch courses, units, userProgress,
- * challenges, or any other unit's lessons — only `lessons` rows where
+ * challenges, or any other unit's lessons, only `lessons` rows where
  * unitId = 1 AND order >= 3. Safe to run against the live DB: those rows
  * never had challenges attached (db/queries.ts always takes the
  * `challenges.length === 0` branch for unit 1), so there's nothing to cascade.

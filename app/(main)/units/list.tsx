@@ -39,7 +39,7 @@ export const List = ({ courses, activeCourseId }: Props) => {
 
     return (
         <div className="pt-6 flex flex-col gap-4">
-            {/* Top row — 3 cards evenly spaced */}
+            {/* Top row, 3 cards evenly spaced */}
             <div className="flex justify-evenly gap-4">
                 {row1.map((course) => (
                     <Card
@@ -53,7 +53,7 @@ export const List = ({ courses, activeCourseId }: Props) => {
                     />
                 ))}
             </div>
-            {/* Bottom row — 2 cards evenly spaced */}
+            {/* Bottom row, 2 cards evenly spaced */}
             {row2.length > 0 && (
                 <div className="flex justify-evenly gap-4">
                     {row2.map((course) => (

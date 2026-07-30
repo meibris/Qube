@@ -52,7 +52,7 @@ export const ClassroomClient = ({ initialRole, classroomData, forceCreate }: Pro
             if (forceCreate) return "create-classroom"
             return classroomData ? "dashboard" : "create-classroom"
         }
-        // student/other already picked their role — skip straight to joining
+        // student/other already picked their role, skip straight to joining
         return "join-classroom"
     }
 

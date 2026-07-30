@@ -337,7 +337,7 @@ export const getTopTenUsers = cache(async () => {
     })
 
     if (!membership) {
-        // Not in a classroom yet — show only themselves
+        // Not in a classroom yet, show only themselves
         const self = await db.query.userProgress.findFirst({
             where: eq(userProgress.userId, userId),
             columns: { userId: true, userName: true, userImageSrc: true, points: true, characterData: true },

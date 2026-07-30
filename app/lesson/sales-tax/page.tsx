@@ -5,6 +5,7 @@ import { CheckCircle, ChevronDown, ChevronUp } from "lucide-react"
 import { GameShell } from "@/components/game-shell"
 import { saveGameLesson } from "@/actions/game-lesson"
 import { LessonComplete } from "@/app/lesson/lesson-complete"
+import { CoinIcon } from "@/components/coin-icon"
 
 // ── Quiz ──────────────────────────────────────────────────────────────────────
 const QUIZ: { q: string; options: string[]; correct: number; explain: string }[] = [
@@ -18,7 +19,7 @@ const QUIZ: { q: string; options: string[]; correct: number; explain: string }[]
         q: "Who receives the money collected from sales tax?",
         options: ["The store owner", "The buyer gets it back later", "The government", "The bank"],
         correct: 2,
-        explain: "Sales tax is collected by the seller at checkout, but it goes directly to the government — not to the store.",
+        explain: "Sales tax is collected by the seller at checkout, but it goes directly to the government, not to the store.",
     },
     {
         q: "If a jacket costs $50 and the sales tax rate is 8%, what is the total price you pay?",
@@ -35,7 +36,7 @@ const QUIZ: { q: string; options: string[]; correct: number; explain: string }[]
             "The crust of the pie",
         ],
         correct: 1,
-        explain: "Gross income is the whole pie (everything you earn). Sales tax isn't taken from the pie itself — it's an extra crumb the government charges every time you buy something with your pie.",
+        explain: "Gross income is the whole pie (everything you earn). Sales tax isn't taken from the pie itself; it's an extra crumb the government charges every time you buy something with your pie.",
     },
     {
         q: "Which of these is the best description of a sales tax rate?",
@@ -121,13 +122,13 @@ export default function SalesTaxPage() {
                         <h2 className="text-xl font-bold text-gray-800">What Is Sales Tax?</h2>
                         <p className="text-gray-600 text-sm leading-relaxed">
                             Sales tax is a small percentage that the government charges every time you
-                            <strong> buy</strong> something. It gets added on top of the listed price at checkout —
+                            <strong> buy</strong> something. It gets added on top of the listed price at checkout,
                             which is exactly what surprised you at the market.
                         </p>
 
                         <div className="flex flex-col gap-3">
                             {[
-                                { icon: "🏷️", title: "Listed Price", desc: "The price the store advertises — what the sign says. This is what the store keeps." },
+                                { icon: "🏷️", title: "Listed Price", desc: "The price the store advertises, what the sign says. This is what the store keeps." },
                                 { icon: "🏛️", title: "Sales Tax", desc: "A percentage on top of the listed price, collected by the seller and sent straight to the government. You never see it until checkout." },
                                 { icon: "💳", title: "Total Price", desc: "Listed price + sales tax = what you actually pay. Always more than the sign says." },
                             ].map((item, i) => (
@@ -144,9 +145,9 @@ export default function SalesTaxPage() {
                         <div className="rounded-2xl bg-amber-50 border-2 border-amber-200 p-4">
                             <p className="font-bold text-amber-800 mb-2">From the Market:</p>
                             <div className="flex flex-col gap-1 text-sm font-mono">
-                                <div className="flex justify-between"><span className="text-gray-600">Bread (listed)</span><span>10 🪙</span></div>
-                                <div className="flex justify-between text-red-500"><span>Sales tax (10%)</span><span>+1 🪙</span></div>
-                                <div className="flex justify-between border-t border-amber-200 pt-1 mt-1 font-bold"><span className="text-gray-800">You paid</span><span>11 🪙</span></div>
+                                <div className="flex justify-between"><span className="text-gray-600">Bread (listed)</span><span>10 <CoinIcon /></span></div>
+                                <div className="flex justify-between text-red-500"><span>Sales tax (10%)</span><span>+1 <CoinIcon /></span></div>
+                                <div className="flex justify-between border-t border-amber-200 pt-1 mt-1 font-bold"><span className="text-gray-800">You paid</span><span>11 <CoinIcon /></span></div>
                             </div>
                         </div>
 
@@ -165,7 +166,7 @@ export default function SalesTaxPage() {
                         <div className="rounded-2xl bg-orange-50 border-2 border-orange-200 p-6 text-center">
                             <p className="text-5xl mb-3">🥧</p>
                             <p className="font-bold text-orange-800 text-lg mb-1">Your Gross Income = the whole pie</p>
-                            <p className="text-orange-700 text-sm">Everything you earned — before any deductions, taxes, or spending.</p>
+                            <p className="text-orange-700 text-sm">Everything you earned, before any deductions, taxes, or spending.</p>
                         </div>
 
                         <div className="grid sm:grid-cols-2 gap-4">
@@ -177,16 +178,16 @@ export default function SalesTaxPage() {
                             <div className="rounded-2xl bg-red-50 border-2 border-red-200 p-4 text-center">
                                 <p className="text-3xl mb-2">🫙</p>
                                 <p className="font-bold text-red-800 text-sm">Sales Tax = an extra crumb</p>
-                                <p className="text-red-600 text-xs mt-1">Charged <em>when you spend</em>. It&apos;s not from the pie — it&apos;s extra, tacked on at checkout.</p>
+                                <p className="text-red-600 text-xs mt-1">Charged <em>when you spend</em>. It&apos;s not from the pie; it&apos;s extra, tacked on at checkout.</p>
                             </div>
                         </div>
 
                         <div className="rounded-2xl bg-gray-50 border border-gray-200 p-5">
                             <p className="font-bold text-gray-700 mb-2">Key difference:</p>
                             <p className="text-sm text-gray-600 leading-relaxed">
-                                <strong>Income tax</strong> is deducted from what you <em>earn</em> — it shrinks your pie.
+                                <strong>Income tax</strong> is deducted from what you <em>earn</em>; it shrinks your pie.
                                 <br />
-                                <strong>Sales tax</strong> is added to what you <em>buy</em> — it&apos;s an extra crumb on top, paid
+                                <strong>Sales tax</strong> is added to what you <em>buy</em>; it&apos;s an extra crumb on top, paid
                                 every time you spend a slice of your pie.
                             </p>
                         </div>
@@ -208,7 +209,7 @@ export default function SalesTaxPage() {
                 {section === "examples" && (
                     <div className="flex flex-col gap-5">
                         <h2 className="text-xl font-bold text-gray-800">Sales Tax in the Real World</h2>
-                        <p className="text-gray-600 text-sm">Sales tax exists almost everywhere you shop — but the rate varies by state and country.</p>
+                        <p className="text-gray-600 text-sm">Sales tax exists almost everywhere you shop, but the rate varies by state and country.</p>
 
                         {[
                             {
@@ -217,7 +218,7 @@ export default function SalesTaxPage() {
                             },
                             {
                                 q: "What things are taxed?",
-                                a: "Most physical goods you buy — clothes, electronics, furniture, toys. However, many states exempt groceries (food you cook at home) and prescription medicine. Prepared food (like restaurant meals) is almost always taxed.",
+                                a: "Most physical goods you buy: clothes, electronics, furniture, toys. However, many states exempt groceries (food you cook at home) and prescription medicine. Prepared food (like restaurant meals) is almost always taxed.",
                             },
                             {
                                 q: "Where does sales tax money go?",
@@ -225,7 +226,7 @@ export default function SalesTaxPage() {
                             },
                             {
                                 q: "How does the store collect it?",
-                                a: "The store adds it at checkout automatically. At the end of the month (or quarter), the store sends all the collected sales tax directly to the state government. You never touch that money — you pay it and it goes straight through the store to the government.",
+                                a: "The store adds it at checkout automatically. At the end of the month (or quarter), the store sends all the collected sales tax directly to the state government. You never touch that money; you pay it and it goes straight through the store to the government.",
                             },
                         ].map((item, i) => (
                             <div key={i} className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
@@ -253,7 +254,7 @@ export default function SalesTaxPage() {
                 {/* ── QUIZ ──────────────────────────────────────────────── */}
                 {section === "quiz" && (
                     <div className="flex flex-col gap-6">
-                        <h2 className="text-xl font-bold text-gray-800">Quick Check — {score}/{QUIZ.length} correct</h2>
+                        <h2 className="text-xl font-bold text-gray-800">Quick Check: {score}/{QUIZ.length} correct</h2>
 
                         {QUIZ.map((q, qi) => (
                             <div key={qi} className="rounded-2xl border border-gray-200 bg-white shadow-sm p-5 flex flex-col gap-3">
@@ -294,12 +295,12 @@ export default function SalesTaxPage() {
                         {allAnswered && (
                             <div className={`rounded-2xl p-5 border-2 flex flex-col gap-3 ${allCorrect ? "bg-green-50 border-green-200" : "bg-blue-50 border-blue-200"}`}>
                                 <p className={`font-bold text-lg ${allCorrect ? "text-green-800" : "text-blue-800"}`}>
-                                    {allCorrect ? "🎉 Perfect score!" : `${score}/${QUIZ.length} — Good effort!`}
+                                    {allCorrect ? "🎉 Perfect score!" : `${score}/${QUIZ.length}: Good effort!`}
                                 </p>
                                 <p className={`text-sm ${allCorrect ? "text-green-700" : "text-blue-700"}`}>
                                     {allCorrect
                                         ? "You've got sales tax down. Time for the next lesson!"
-                                        : "Review the sections above if anything was tricky — then complete the lesson!"}
+                                        : "Review the sections above if anything was tricky, then complete the lesson!"}
                                 </p>
                                 <button
                                     onClick={handleComplete}

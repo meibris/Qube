@@ -43,6 +43,7 @@ export const Sidebar = async ({ className }: Props) => {
 
           <div className="flex flex-col gap-y-2 flex-1 min-h-0 overflow-y-auto">
             <SidebarItem label="Learn"            href="/learn"             iconSrc="/learn.svg" />
+            <SidebarItem label="Play"             href="/play"              iconSrc="/play.svg" />
             <SidebarItem label="Leaderboard"      href="/leaderboard"       iconSrc="/leaderboard.svg" />
             <SidebarItem label="Quests"           href="/quests"            iconSrc="/quests.svg" />
             <SidebarItem label="Shop"             href="/shop"              iconSrc="/shop.svg" />

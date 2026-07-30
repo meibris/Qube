@@ -60,7 +60,7 @@ function CategoryDropdown({
 
   return (
     <div className="rounded-2xl border-2 border-gray-100 bg-white overflow-hidden shadow-sm">
-      {/* Header row — click to open/close */}
+      {/* Header row. Click to open/close */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -92,7 +92,7 @@ function CategoryDropdown({
         )}
       </button>
 
-      {/* Image grid — visible when open */}
+      {/* Image grid. Visible when open */}
       {open && (
         <div className="grid grid-cols-4 gap-2 px-4 pb-4 pt-2 border-t border-gray-100">
           {category.images.map((img) => {
@@ -159,16 +159,16 @@ export function CharacterBuilder() {
         </div>
       </div>
 
-      {/* Body — 40/60 split */}
+      {/* Body. 40/60 split */}
       <div className="flex flex-col lg:flex-row flex-1 max-w-5xl mx-auto w-full p-6 gap-8">
 
-        {/* LEFT — 40% — profile preview, sticky on desktop */}
+        {/* LEFT, 40%. Profile preview, sticky on desktop */}
         <div className="flex flex-col items-center justify-center gap-4 lg:w-2/5 lg:sticky lg:top-24 lg:self-start">
           <ProfileCircle image={selectedImage} bgColor={bgColor} />
           <p className="text-sm text-gray-400 italic text-center">Your avatar updates as you pick!</p>
         </div>
 
-        {/* RIGHT — 60% — dropdowns */}
+        {/* RIGHT, 60%. Dropdowns */}
         <div className="flex flex-col gap-4 lg:w-3/5 pb-8">
 
           {/* ── Background Color ── */}

@@ -74,7 +74,7 @@ export async function getPlayerColor(): Promise<string> {
 }
 
 /**
- * Returns the player's current coin balance (tokens + accrued since job start).
+ * Returns the player's current coin balance.
  */
 export async function getInitialCoins(): Promise<number> {
     const { userId } = await auth()
@@ -85,10 +85,5 @@ export async function getInitialCoins(): Promise<number> {
     })
     if (!progress) return 0
 
-    let coins = progress.tokens ?? 0
-    if (progress.jobStartedAt && progress.tokenRate) {
-        const elapsed = (Date.now() - new Date(progress.jobStartedAt).getTime()) / 3_600_000
-        coins += Math.floor(elapsed * progress.tokenRate)
-    }
-    return Math.max(0, coins)
+    return Math.max(0, progress.tokens ?? 0)
 }

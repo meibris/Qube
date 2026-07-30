@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { GameShell } from "@/components/game-shell"
 import { saveGameLesson } from "@/actions/game-lesson"
+import { CoinIcon } from "@/components/coin-icon"
 
 // ── Bracket config ────────────────────────────────────────────────────────────
 const BRACKET_1_LIMIT = 50   // first 50 coins → 20% tax
@@ -40,7 +41,7 @@ export default function TaxBracketsGamePage() {
             progress={progress[phase]}
             instructions={
                 <>
-                    <p>The Governor has changed his tax system. This time, the more you earn, the higher percentage he takes — but only on the <em>extra</em> coins.</p>
+                    <p>The Governor has changed his tax system. This time, the more you earn, the higher percentage he takes, but only on the <em>extra</em> coins.</p>
                     <p className="mt-1 text-xs text-gray-500">Watch how tax brackets work as you make two deliveries to the Governor.</p>
                 </>
             }
@@ -55,8 +56,8 @@ export default function TaxBracketsGamePage() {
                             <h2 className="text-xl font-bold text-amber-800 mb-3">The Governor Has a New Tax System</h2>
                             <p className="text-amber-700 text-sm leading-relaxed">
                                 Last time, the Governor took a flat 10% of everything you earned.
-                                But this season he&apos;s switched to a <strong>tax bracket system</strong> —
-                                the more coins you earn, the higher the rate on the <em>extra</em> coins.
+                                But this season he&apos;s switched to a <strong>tax bracket system</strong>.
+                                The more coins you earn, the higher the rate on the <em>extra</em> coins.
                             </p>
                         </div>
 
@@ -107,7 +108,7 @@ export default function TaxBracketsGamePage() {
                         <div className="rounded-2xl bg-green-50 border-2 border-green-200 p-5 w-full text-center">
                             <h2 className="text-xl font-bold text-green-800 mb-2">First Delivery!</h2>
                             <p className="text-green-700 text-sm">
-                                You spent the morning harvesting berries. You collect <strong>50 berries</strong> and sell them —
+                                You spent the morning harvesting berries. You collect <strong>50 berries</strong> and sell them,
                                 earning <strong>50 coins</strong> gross income.
                             </p>
                         </div>
@@ -125,7 +126,7 @@ export default function TaxBracketsGamePage() {
                                 <span className="font-bold text-green-700 text-sm w-16 text-right">50 berries</span>
                             </div>
                             <div className="flex items-center gap-3">
-                                <span className="text-2xl">🪙</span>
+                                <span className="text-2xl"><CoinIcon /></span>
                                 <div className="flex-1">
                                     <div className="h-4 bg-gray-100 rounded-full overflow-hidden">
                                         <div className="h-full bg-yellow-400 rounded-full w-full transition-all" />
@@ -165,7 +166,7 @@ export default function TaxBracketsGamePage() {
                             <div className="p-5 flex flex-col gap-3 font-mono text-sm">
                                 <div className="flex justify-between items-center">
                                     <span className="text-gray-500">Coins in Bracket 1</span>
-                                    <span className="font-bold">50 🪙</span>
+                                    <span className="font-bold">50 <CoinIcon /></span>
                                 </div>
                                 <div className="flex justify-between items-center">
                                     <span className="text-gray-500">× Tax rate</span>
@@ -173,11 +174,11 @@ export default function TaxBracketsGamePage() {
                                 </div>
                                 <div className="border-t border-gray-200 pt-2 flex justify-between items-center">
                                     <span className="text-red-600 font-bold">Tax taken</span>
-                                    <span className="font-extrabold text-red-600 text-lg">−{TAX_1} 🪙</span>
+                                    <span className="font-extrabold text-red-600 text-lg">−{TAX_1} <CoinIcon /></span>
                                 </div>
                                 <div className="border-t border-gray-200 pt-2 flex justify-between items-center">
                                     <span className="text-green-700 font-bold">You keep</span>
-                                    <span className="font-extrabold text-green-700 text-lg">{BRACKET_1_LIMIT - TAX_1} 🪙</span>
+                                    <span className="font-extrabold text-green-700 text-lg">{BRACKET_1_LIMIT - TAX_1} <CoinIcon /></span>
                                 </div>
                             </div>
                         </div>
@@ -201,7 +202,7 @@ export default function TaxBracketsGamePage() {
                         <div className="rounded-2xl bg-orange-50 border-2 border-orange-200 p-5 w-full text-center">
                             <h2 className="text-xl font-bold text-orange-800 mb-2">Overtime Delivery!</h2>
                             <p className="text-orange-700 text-sm">
-                                You stayed late and harvested <strong>10 more berries</strong> — earning an extra <strong>10 coins</strong>.
+                                You stayed late and harvested <strong>10 more berries</strong>, earning an extra <strong>10 coins</strong>.
                                 Your total gross income is now <strong>60 coins</strong>.
                             </p>
                             <p className="text-orange-600 text-xs mt-2">But those extra 10 coins cross into a higher bracket…</p>
@@ -243,7 +244,7 @@ export default function TaxBracketsGamePage() {
                         <div className="rounded-2xl bg-yellow-50 border-2 border-yellow-300 p-5 w-full">
                             <p className="text-xs font-bold uppercase tracking-widest text-yellow-600 mb-2">👑 The Governor Speaks</p>
                             <p className="italic text-gray-700 text-sm">
-                                &quot;Those extra 10 coins? That&apos;s Bracket 2 territory. That&apos;ll be 30% of those — but only those.
+                                &quot;Those extra 10 coins? That&apos;s Bracket 2 territory. That&apos;ll be 30% of those, but only those.
                                 Your first 50 coins stay at 20%, as promised.&quot;
                             </p>
                         </div>
@@ -256,7 +257,7 @@ export default function TaxBracketsGamePage() {
                             <div className="p-5 flex flex-col gap-3 font-mono text-sm">
                                 <div className="flex justify-between items-center">
                                     <span className="text-gray-500">Coins in Bracket 2</span>
-                                    <span className="font-bold">10 🪙</span>
+                                    <span className="font-bold">10 <CoinIcon /></span>
                                 </div>
                                 <div className="flex justify-between items-center">
                                     <span className="text-gray-500">× Tax rate</span>
@@ -264,11 +265,11 @@ export default function TaxBracketsGamePage() {
                                 </div>
                                 <div className="border-t border-gray-200 pt-2 flex justify-between items-center">
                                     <span className="text-red-600 font-bold">Tax taken</span>
-                                    <span className="font-extrabold text-red-600 text-lg">−{TAX_2} 🪙</span>
+                                    <span className="font-extrabold text-red-600 text-lg">−{TAX_2} <CoinIcon /></span>
                                 </div>
                                 <div className="border-t border-gray-200 pt-2 flex justify-between items-center">
                                     <span className="text-green-700 font-bold">You keep (extra)</span>
-                                    <span className="font-extrabold text-green-700 text-lg">{BRACKET_2_LIMIT - TAX_2} 🪙</span>
+                                    <span className="font-extrabold text-green-700 text-lg">{BRACKET_2_LIMIT - TAX_2} <CoinIcon /></span>
                                 </div>
                             </div>
                         </div>
@@ -299,25 +300,25 @@ export default function TaxBracketsGamePage() {
                             <div className="p-5 flex flex-col gap-2 text-sm font-mono">
                                 <div className="flex justify-between text-gray-600">
                                     <span>Gross income (total earned)</span>
-                                    <span className="font-bold text-gray-800">{TOTAL_GROSS} 🪙</span>
+                                    <span className="font-bold text-gray-800">{TOTAL_GROSS} <CoinIcon /></span>
                                 </div>
                                 <div className="border-t border-dashed border-gray-200 pt-2 mt-1 flex flex-col gap-1">
                                     <div className="flex justify-between text-blue-600">
                                         <span>Bracket 1 tax (50 × 20%)</span>
-                                        <span>−{TAX_1} 🪙</span>
+                                        <span>−{TAX_1} <CoinIcon /></span>
                                     </div>
                                     <div className="flex justify-between text-orange-500">
                                         <span>Bracket 2 tax (10 × 30%)</span>
-                                        <span>−{TAX_2} 🪙</span>
+                                        <span>−{TAX_2} <CoinIcon /></span>
                                     </div>
                                     <div className="flex justify-between text-red-600 font-bold border-t border-gray-200 pt-1 mt-1">
                                         <span>Total tax paid</span>
-                                        <span>−{TOTAL_TAX} 🪙</span>
+                                        <span>−{TOTAL_TAX} <CoinIcon /></span>
                                     </div>
                                 </div>
                                 <div className="border-t-2 border-gray-800 pt-2 mt-1 flex justify-between font-extrabold text-green-700 text-base">
                                     <span>Net income (you keep)</span>
-                                    <span>{NET} 🪙</span>
+                                    <span>{NET} <CoinIcon /></span>
                                 </div>
                             </div>
                         </div>
@@ -329,7 +330,7 @@ export default function TaxBracketsGamePage() {
                                 {((TOTAL_TAX / TOTAL_GROSS) * 100).toFixed(1)}%
                             </p>
                             <p className="text-sm text-purple-600 mt-1">
-                                That&apos;s your <em>actual</em> average rate — lower than 30%, because only the top coins hit the higher bracket.
+                                That&apos;s your <em>actual</em> average rate, lower than 30%, because only the top coins hit the higher bracket.
                             </p>
                         </div>
 

@@ -1,6 +1,6 @@
 /**
  * One-time fix: sets exact orders for all unit 1 lessons by ID.
- * Safe to run multiple times — uses explicit ID-based UPDATEs.
+ * Safe to run multiple times; uses explicit ID-based UPDATEs.
  */
 import "dotenv/config"
 import { neon } from "@neondatabase/serverless"

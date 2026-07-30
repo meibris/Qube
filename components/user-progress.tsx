@@ -62,7 +62,7 @@ export const UserProgress = ({
         catch { return null }
     })()
 
-    // Only show the custom profile image — never fall back to Clerk avatar
+    // Only show the custom profile image. Never fall back to Clerk avatar
     const avatarSrc = profile?.selectedImage
     const avatarBg = profile?.bgColor ?? "#bfdbfe"
 
@@ -86,7 +86,7 @@ export const UserProgress = ({
 
             <FreezeUsedPopup freezeUsedAt={freezeUsedAt ?? null} streakFreezes={streakFreezes} />
 
-            {/* Stat row — streak | XP | coins */}
+            {/* Stat row, streak | XP | coins */}
             <div className="flex items-center justify-evenly w-full gap-x-2">
                 {/* Streak */}
                 <Button
@@ -115,7 +115,7 @@ export const UserProgress = ({
                 </Button>
             </div>
 
-            {/* Game Stats — shown after job is chosen */}
+            {/* Game Stats, shown after job is chosen */}
             {chosenJob?.job && (
                 <div className="w-full mt-1 rounded-xl border border-gray-100 bg-gray-50 p-3">
                     <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Game Stats</p>

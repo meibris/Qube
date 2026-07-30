@@ -23,7 +23,7 @@ async function main() {
     for (const lesson of newLessons) {
         const existing = await sql`SELECT id FROM lessons WHERE id = ${lesson.id}`
         if (existing.length > 0) {
-            console.log(`Lesson id=${lesson.id} "${lesson.title}" already exists — skipping`)
+            console.log(`Lesson id=${lesson.id} "${lesson.title}" already exists, skipping`)
             continue
         }
         await sql`

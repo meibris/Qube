@@ -5,6 +5,7 @@ import { CheckCircle, ChevronDown, ChevronUp } from "lucide-react"
 import { GameShell } from "@/components/game-shell"
 import { saveGameLesson } from "@/actions/game-lesson"
 import { LessonComplete } from "@/app/lesson/lesson-complete"
+import { CoinIcon } from "@/components/coin-icon"
 
 // ── Activity: bracket table ───────────────────────────────────────────────────
 interface BracketRow {
@@ -54,11 +55,11 @@ const QUIZ: { q: string; options: string[]; correct: number; explain: string }[]
             "Your whole income is taxed at the new rate",
         ],
         correct: 1,
-        explain: "Each bucket represents a bracket. Once full, overflow spills into the next bucket — only the overflow is taxed at the higher rate.",
+        explain: "Each bucket represents a bracket. Once full, overflow spills into the next bucket. Only the overflow is taxed at the higher rate.",
     },
     {
         q: "Earning more money in a higher bracket means your ENTIRE income is taxed at the higher rate. True or False?",
-        options: ["True", "False — only the coins in each bracket pay that bracket's rate", "True, but only above $100,000", "Depends on the year"],
+        options: ["True", "False, only the coins in each bracket pay that bracket's rate", "True, but only above $100,000", "Depends on the year"],
         correct: 1,
         explain: "False! This is the biggest misconception about brackets. Each bracket's rate only applies to the income within that range. Lower brackets always stay at their lower rate.",
     },
@@ -183,7 +184,7 @@ export default function TaxBracketsPage() {
                         <h2 className="text-xl font-bold text-gray-800">Tax Brackets = Buckets</h2>
                         <p className="text-gray-600 text-sm leading-relaxed">
                             Imagine your income as water being poured into a row of buckets.
-                            Each bucket represents a tax bracket — a range of income taxed at a specific rate.
+                            Each bucket represents a tax bracket, a range of income taxed at a specific rate.
                             You fill the buckets left to right, and <strong>only the water in each bucket</strong> is taxed at that bucket&apos;s rate.
                         </p>
 
@@ -216,14 +217,14 @@ export default function TaxBracketsPage() {
 
                             {/* Live tax display */}
                             <div className="mt-4 rounded-xl bg-white border border-gray-200 p-3 text-sm font-mono">
-                                <div className="flex justify-between"><span className="text-gray-500">Income</span><span className="font-bold">{incomeDemo} 🪙</span></div>
-                                <div className="flex justify-between text-blue-600"><span>Bracket 1 tax (×20%)</span><span>−{Math.round(Math.min(incomeDemo, 50) * 0.20)} 🪙</span></div>
+                                <div className="flex justify-between"><span className="text-gray-500">Income</span><span className="font-bold">{incomeDemo} <CoinIcon /></span></div>
+                                <div className="flex justify-between text-blue-600"><span>Bracket 1 tax (×20%)</span><span>−{Math.round(Math.min(incomeDemo, 50) * 0.20)} <CoinIcon /></span></div>
                                 {incomeDemo > 50 && (
-                                    <div className="flex justify-between text-orange-500"><span>Bracket 2 tax (×30%)</span><span>−{Math.round((incomeDemo - 50) * 0.30)} 🪙</span></div>
+                                    <div className="flex justify-between text-orange-500"><span>Bracket 2 tax (×30%)</span><span>−{Math.round((incomeDemo - 50) * 0.30)} <CoinIcon /></span></div>
                                 )}
                                 <div className="flex justify-between border-t border-gray-200 pt-1 mt-1 font-bold text-green-700">
                                     <span>You keep</span>
-                                    <span>{incomeDemo - Math.round(Math.min(incomeDemo, 50) * 0.20) - (incomeDemo > 50 ? Math.round((incomeDemo - 50) * 0.30) : 0)} 🪙</span>
+                                    <span>{incomeDemo - Math.round(Math.min(incomeDemo, 50) * 0.20) - (incomeDemo > 50 ? Math.round((incomeDemo - 50) * 0.30) : 0)} <CoinIcon /></span>
                                 </div>
                             </div>
                         </div>
@@ -231,7 +232,7 @@ export default function TaxBracketsPage() {
                         <div className="flex flex-col gap-3">
                             {[
                                 { icon: "🪣", title: "Bucket 1 fills first", desc: "Your first 50 coins always go into Bucket 1 and are taxed at 20%. This never changes, even if you earn 1000 coins." },
-                                { icon: "💧", title: "Overflow spills into Bucket 2", desc: "Any coins above 50 spill into Bucket 2 and are taxed at 30% — but only those extra coins." },
+                                { icon: "💧", title: "Overflow spills into Bucket 2", desc: "Any coins above 50 spill into Bucket 2 and are taxed at 30%, but only those extra coins." },
                                 { icon: "🔑", title: "Key insight", desc: "Moving into a higher bracket never hurts you. You always take home more money by earning more, because the higher rate only applies to the new coins." },
                             ].map((item, i) => (
                                 <div key={i} className="rounded-2xl border border-gray-200 bg-white p-4 flex gap-3 items-start shadow-sm">
@@ -324,7 +325,7 @@ export default function TaxBracketsPage() {
                                 },
                                 {
                                     q: "How is this different from a flat tax?",
-                                    a: "A flat tax applies one rate to everything. If this were a flat 30% on 60 coins, you'd owe 18 coins instead of 13. The bracket system is more generous to lower income — your first coins are always taxed at the lowest rate.",
+                                    a: "A flat tax applies one rate to everything. If this were a flat 30% on 60 coins, you'd owe 18 coins instead of 13. The bracket system is more generous to lower income; your first coins are always taxed at the lowest rate.",
                                 },
                             ].map((item, i) => (
                                 <div key={i} className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
@@ -375,7 +376,7 @@ export default function TaxBracketsPage() {
                                         return (
                                             <tr key={i} className={checked ? (correct ? "bg-green-50" : "bg-red-50") : "bg-white"}>
                                                 <td className="px-4 py-3 font-semibold text-gray-700">{row.label}</td>
-                                                <td className="px-4 py-3 text-right font-mono">{row.amount} 🪙</td>
+                                                <td className="px-4 py-3 text-right font-mono">{row.amount} <CoinIcon /></td>
                                                 <td className="px-4 py-3 text-right font-mono font-bold">
                                                     <span className={row.rate === 20 ? "text-blue-600" : "text-orange-500"}>{row.rate}%</span>
                                                 </td>
@@ -397,7 +398,7 @@ export default function TaxBracketsPage() {
                                                                 : "border-red-400 bg-red-50 text-red-700"
                                                             }`}
                                                         />
-                                                        <span className="text-gray-500 text-xs">🪙</span>
+                                                        <span className="text-gray-500 text-xs"><CoinIcon /></span>
                                                         {checked && correct && <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />}
                                                         {checked && !correct && (
                                                             <span className="text-xs text-red-500 font-bold">→ {row.answer}</span>
@@ -433,7 +434,7 @@ export default function TaxBracketsPage() {
                                                         : "border-red-400 bg-red-50 text-red-700"
                                                     }`}
                                                 />
-                                                <span className="text-gray-500 text-xs">🪙</span>
+                                                <span className="text-gray-500 text-xs"><CoinIcon /></span>
                                                 {totalResult && <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />}
                                                 {totalResult === false && (
                                                     <span className="text-xs text-red-500 font-bold">→ {TOTAL_ANSWER}</span>
@@ -458,7 +459,7 @@ export default function TaxBracketsPage() {
                         ) : (
                             <div className={`rounded-2xl p-4 border-2 flex flex-col gap-2 ${activityPassed ? "bg-green-50 border-green-200" : "bg-amber-50 border-amber-200"}`}>
                                 <p className={`font-bold text-sm ${activityPassed ? "text-green-800" : "text-amber-800"}`}>
-                                    {activityPassed ? "✅ All correct! Great work." : "Some answers need fixing — the correct values are shown in red."}
+                                    {activityPassed ? "✅ All correct! Great work." : "Some answers need fixing; the correct values are shown in red."}
                                 </p>
                                 {!activityPassed && (
                                     <button
@@ -484,7 +485,7 @@ export default function TaxBracketsPage() {
                 {/* ── QUIZ ──────────────────────────────────────────────── */}
                 {section === "quiz" && (
                     <div className="flex flex-col gap-6">
-                        <h2 className="text-xl font-bold text-gray-800">Quick Check — {score}/{QUIZ.length} correct</h2>
+                        <h2 className="text-xl font-bold text-gray-800">Quick Check. {score}/{QUIZ.length} correct</h2>
 
                         {QUIZ.map((q, qi) => (
                             <div key={qi} className="rounded-2xl border border-gray-200 bg-white shadow-sm p-5 flex flex-col gap-3">
@@ -525,7 +526,7 @@ export default function TaxBracketsPage() {
                         {allAnswered && (
                             <div className={`rounded-2xl p-5 border-2 flex flex-col gap-3 ${allCorrect ? "bg-green-50 border-green-200" : "bg-blue-50 border-blue-200"}`}>
                                 <p className={`font-bold text-lg ${allCorrect ? "text-green-800" : "text-blue-800"}`}>
-                                    {allCorrect ? "🎉 Perfect score!" : `${score}/${QUIZ.length} — Good effort!`}
+                                    {allCorrect ? "🎉 Perfect score!" : `${score}/${QUIZ.length}. Good effort!`}
                                 </p>
                                 <p className={`text-sm ${allCorrect ? "text-green-700" : "text-blue-700"}`}>
                                     {allCorrect
