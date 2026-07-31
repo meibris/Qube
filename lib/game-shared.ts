@@ -23,10 +23,12 @@ export const TREE_HIT_R    = 14
 export const BUSH_HIT_R    = 10
 export const TREE_HIT_OY   = 16
 export const BUSH_HIT_OY   = 6
-export const MUSHROOM_HIT_R  = 8
-export const WOOD_HIT_R      = 9
-export const MUSHROOM_HIT_OY = 2
-export const WOOD_HIT_OY     = 2
+// Small ground clutter, not real obstacles — tiny collision footprint so
+// they barely nudge the player instead of feeling like solid objects.
+export const MUSHROOM_HIT_R  = 4
+export const WOOD_HIT_R      = 4
+export const MUSHROOM_HIT_OY = 0
+export const WOOD_HIT_OY     = 0
 
 // ─── NPC ─────────────────────────────────────────────────────────────────────
 export const NPC_HALF  = 6

@@ -48,20 +48,6 @@ const MAP_DRAIN = 1 / (60 * 5) // 1% every 5 seconds at 60fps
 // ─── Lesson 1 constants ───────────────────────────────────────────────────────
 const L1_NPC_MAX_TRADES=5, L1_NPC_BUY_RESET=7200
 const L1_TIP_COINS=2, L1_FORAGE_GOAL=10
-// Three tour-stop props near spawn — "read the sign" flavor moments, no
-// map-generation footprint (unlike the shared BUILDING_DEFS structures used
-// by other lessons), just small world-space props next to the player's start.
-// Rows 24-28 (cols 20-54) are carved into water to split the main island
-// (see buildMap's north/south split), so these stay north of that gap.
-const L1_HUT_X=38*TS, L1_HUT_Y=17*TS
-const L1_SHED_X=33*TS, L1_SHED_Y=19*TS
-const L1_HALL_X=43*TS, L1_HALL_Y=19*TS
-const L1_TOUR_STOPS=[
-  {x:L1_HUT_X,  y:L1_HUT_Y,  label:"Your Hut",  color:"#3b82f6", sign:"Your Hut — your home base."},
-  {x:L1_SHED_X, y:L1_SHED_Y, label:"Town Shed", color:"#92400e", sign:"Town Shed — tools, borrowed gear."},
-  {x:L1_HALL_X, y:L1_HALL_Y, label:"Town Hall", color:"#6366f1", sign:"Town Hall — quests, announcements."},
-]
-const L1_TOUR_INTERACT=TS*1.8
 
 // ─── Lesson Farm constants ────────────────────────────────────────────────────
 // Plot sits just west of the Income Center (the "town center" building), same
@@ -79,11 +65,14 @@ const FARM_ROW_CENTERS=Array.from({length:FARM_PLOT_ROWS},(_,i)=>({
 
 // ─── Foliage draw sizes ───────────────────────────────────────────────────────
 const TREE_DW=64, TREE_DH=64, BUSH_DW=48, BUSH_DH=24
+// Sprite cells (16px grid) in Basic_Grass_Biom_things.png — single mushroom
+// cap at col 5/row 0, a cut log at col 5/row 2.
+const MUSHROOM_SPRITE:[number,number]=[5*16,0*16]
+const WOOD_SPRITE:[number,number]=[5*16,2*16]
 
 // ─── Lesson 1 stages ──────────────────────────────────────────────────────────
-// Linear flow: Bloo teaches move/harvest/eat → a quick building tour (Market,
-// Town Shed, Town Hall, your Hut) doubling as the forage-goal pitch → free
-// foraging until 10 items → walk to the Market and sell everything → wrap-up.
+// Linear flow: Bloo teaches move/harvest/eat → a quick pitch on foraging →
+// free foraging until 10 items → walk to the Market and sell everything → wrap-up.
 // No taxes, no gross-income talk — just the basic gather → sell loop.
 const L1_INTRO=0, L1_HARVEST=1, L1_TOUR=2, L1_FORAGE=3
 const L1_SELL_INTRO=4, L1_SELLING=5, L1_WRAP_UP=6, L1_COMPLETE=7
@@ -152,12 +141,8 @@ const L1_BLOO_HARVEST_REMIND: string[] = [
   "Once you have berries, press [X] to eat one. Stay fed!",
 ]
 const L1_BLOO_TOUR: string[] = [
-  "Nice! Exploring takes energy, and eating keeps you going. Now let's take a quick look around town.",
-  "Walk up to any building and press [Z] to read its sign.",
-  "The Market sells and buys items. The Town Shed has tools and borrowed gear.",
-  "Town Hall posts quests and announcements. And that's your Hut, your home base.",
-  "You'll use these places a lot.",
-  "This island is also full of things to gather: berries on bushes and trees, mushrooms on the ground, and wood near fallen branches.",
+  "Nice! Exploring takes energy, and eating keeps you going. Now let's talk about earning.",
+  "This island is full of things to gather: berries on bushes and trees, mushrooms on the ground, and wood near fallen branches.",
   "Everything here can be picked up and sold at the Market. It's the most basic income source!",
   `Collect ${L1_FORAGE_GOAL} items, any mix you want, then sell them at the Market! Go!`,
 ]
@@ -342,7 +327,7 @@ const WATER=0, GRASS=1, FLOWER=2, PATH=3
 const B_INCOME=4, B_TAX=5, B_BUDGET=6, B_SAVINGS=7, B_MARKET=8
 type TileID = 0|1|2|3|4|5|6|7|8
 const BUILDING_DEFS: BuildingDef[] = [
-  { tile:B_INCOME,  r1:19, r2:23, c1:27, c2:32, color:"#3b82f6", border:"#1d4ed8", label:["Income","Center"], svg:"house" },
+  { tile:B_INCOME,  r1:19, r2:23, c1:27, c2:32, color:"#3b82f6", border:"#1d4ed8", label:[], svg:"house" },
   { tile:B_BUDGET,  r1:31, r2:35, c1:39, c2:44, color:"#8b5cf6", border:"#6d28d9", label:["Budget","HQ"],     svg:"cabin" },
   { tile:B_SAVINGS, r1:24, r2:28, c1:5,  c2:10, color:"#f59e0b", border:"#b45309", label:["Community","Cottage"],  svg:"tallcabin" },
   { tile:B_TAX,     r1:9,  r2:13, c1:60, c2:65, color:"#ef4444", border:"#b91c1c", label:["The","Bank"],    svg:"tallhouse" },
@@ -649,32 +634,35 @@ function isBlocking(wx:number,wy:number):boolean{
   return false
 }
 
-// ─── Ambient ground decor (mushrooms, fallen logs, lily pads/rocks) ───────────
+// ─── Ambient ground decor (mushrooms, fallen logs, lily pads) ─────────────────
 // Sprites come from Basic_Grass_Grass_Biom_things.png, a 9x5 grid of 16px tiles.
-// Row 1 cols 4-7: mushrooms. Row 3 col 6: fallen log. Row 5 cols 6-9: rocks/lily pads.
+// Row 1 cols 4-7: mushrooms. Row 3 col 6: fallen log. Row 5 cols 8-9: lily pads.
 const BIOM_TS=16
 const MUSHROOM_SRC=[3,4,5,6].map(ci=>({sx:ci*BIOM_TS,sy:0*BIOM_TS}))
 const LOG_SRC={sx:5*BIOM_TS,sy:2*BIOM_TS}
-const ROCK_SRC=[5,6].map(ci=>({sx:ci*BIOM_TS,sy:4*BIOM_TS}))
 const LILY_SRC=[7,8].map(ci=>({sx:ci*BIOM_TS,sy:4*BIOM_TS}))
 function biomHash(r:number,c:number,salt:number){return ((r*92821+c*68917+salt*104729)%1000+1000)%1000}
+// Ambient mushrooms are purely decorative (not the harvestable FoliageNode
+// kind), but still get a tiny collision footprint so the player doesn't
+// visually clip straight through them.
+const AMBIENT_DECOR_HIT_R=3
 interface DecorNode{wx:number;wy:number;variant:number}
+// Buildings sit on their own tiles, so a GRASS tile right at their foot has
+// no GRASS_EDGE flag — without this check ambient mushrooms can spawn
+// jammed against a building wall, which reads as random clutter rather
+// than natural ground decor.
+const nearBuilding=(r:number,c:number)=>BUILDING_DEFS.some(b=>r>=b.r1-1&&r<=b.r2+1&&c>=b.c1-1&&c<=b.c2+1)
 const MUSHROOMS: DecorNode[] = (()=>{
   const nodes:DecorNode[]=[]
   for(let r=0;r<MAP_H;r++)for(let c=0;c<MAP_W;c++){
-    if(MAP[r][c]!==GRASS||FLOWER_MAP[r]?.[c]||GRASS_EDGE[r]?.[c])continue
+    if(MAP[r][c]!==GRASS||FLOWER_MAP[r]?.[c]||GRASS_EDGE[r]?.[c]||nearBuilding(r,c))continue
     if(biomHash(r,c,11)<15)nodes.push({wx:(c+0.5)*TS,wy:(r+0.55)*TS,variant:biomHash(r,c,23)%MUSHROOM_SRC.length})
   }
   return nodes
 })()
-interface WaterDecorNode{wx:number;wy:number;kind:"rock"|"lily";variant:number}
+interface WaterDecorNode{wx:number;wy:number;kind:"lily";variant:number}
 const WATER_DECOR: WaterDecorNode[] = (()=>{
   const nodes:WaterDecorNode[]=[]
-  for(let r=0;r<MAP_H;r++)for(let c=0;c<MAP_W;c++){
-    if(MAP[r][c]===GRASS&&GRASS_EDGE[r]?.[c]&&biomHash(r,c,53)<180){
-      nodes.push({wx:(c+0.5)*TS,wy:(r+0.6)*TS,kind:"rock",variant:biomHash(r,c,59)%ROCK_SRC.length})
-    }
-  }
   for(let r=0;r<MAP_H;r++)for(let c=0;c<MAP_W;c++){
     if(MAP[r][c]!==WATER)continue
     const nearShore=[[r-1,c],[r+1,c],[r,c-1],[r,c+1]].some(([nr,nc])=>nr>=0&&nr<MAP_H&&nc>=0&&nc<MAP_W&&(MAP[nr][nc]===GRASS||BRIDGE_TILES.has(`${nr},${nc}`)))
@@ -706,8 +694,8 @@ function drawBiomDecor(ctx:CanvasRenderingContext2D,camX:number,camY:number,cw:n
   const inView=(wx:number,wy:number)=>wx>camX-TS&&wx<camX+cw+TS&&wy>camY-TS&&wy<camY+ch+TS
   for(const n of WATER_DECOR){
     if(!inView(n.wx,n.wy))continue
-    const src=n.kind==="rock"?ROCK_SRC[n.variant]:LILY_SRC[n.variant]
-    const dw=n.kind==="rock"?TS*0.6:TS*0.55
+    const src=LILY_SRC[n.variant]
+    const dw=TS*0.55*1.8
     ctx.drawImage(img,src.sx,src.sy,BIOM_TS,BIOM_TS,n.wx-camX-dw/2,n.wy-camY-dw/2,dw,dw)
   }
   for(const n of MUSHROOMS){
@@ -812,21 +800,6 @@ function drawNpcs(ctx:CanvasRenderingContext2D,npcs:NpcState[],camX:number,camY:
       ctx.fillStyle="#f87171";ctx.fillText(s,sx,sy-NPC_HALF-8)
     }
   }
-}
-
-// ─── Tour stops (lesson 1) ─────────────────────────────────────────────────────
-// Small flavor props near spawn, not full BUILDING_DEFS structures — just a
-// square + label the player can walk up to and press [Z] to read the sign.
-function drawTourStop(ctx:CanvasRenderingContext2D,camX:number,camY:number,x:number,y:number,label:string,color:string,near:boolean){
-  const sx=Math.round(x-camX),sy=Math.round(y-camY),S=13
-  ctx.fillStyle="rgba(0,0,0,0.22)";ctx.fillRect(sx-S+2,sy+S,S*2-2,4)
-  ctx.fillStyle=color;ctx.fillRect(sx-S,sy-S,S*2,S*2)
-  ctx.fillStyle="rgba(255,255,255,0.35)";ctx.fillRect(sx-S+2,sy-S+2,S-2,S-2)
-  ctx.strokeStyle=near?"#fde68a":"rgba(0,0,0,0.35)";ctx.lineWidth=near?2.5:1.5
-  ctx.strokeRect(sx-S,sy-S,S*2,S*2)
-  ctx.fillStyle="rgba(0,0,0,0.65)";ctx.beginPath();ctx.roundRect(sx-38,sy-S-22,76,18,4);ctx.fill()
-  ctx.fillStyle="#fde68a";ctx.font="bold 10px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
-  ctx.fillText(label,sx,sy-S-13)
 }
 
 // ─── Bloo ─────────────────────────────────────────────────────────────────────
@@ -964,19 +937,22 @@ function initFoliage():FoliageNode[]{
     if(nodes.some(n=>Math.hypot(n.wx-wx,n.wy-wy)<MIN_GAP))return
     nodes.push({wx,wy,type,hasFruit:true,regenTimer:0})
   }
+  // Income Center / Town / Cottage / Budget HQ side of the island reads
+  // red-dot-dominant in the reference screenshot → mostly mushrooms.
+  // The Bank / Market side reads green-dot-dominant → mostly wood.
   tryPlace(22,16,"tree");tryPlace(24,17,"bush");tryPlace(21,19,"bush");tryPlace(23,15,"mushroom")
-  tryPlace(48,16,"tree");tryPlace(51,17,"tree");tryPlace(46,18,"bush");tryPlace(52,19,"bush");tryPlace(49,15,"wood")
+  tryPlace(48,16,"tree");tryPlace(51,17,"tree");tryPlace(46,18,"bush");tryPlace(52,19,"bush");tryPlace(49,15,"mushroom")
   tryPlace(22,25,"tree");tryPlace(25,26,"bush");tryPlace(23,29,"bush");tryPlace(24,24,"mushroom")
-  tryPlace(50,23,"tree");tryPlace(53,25,"bush");tryPlace(48,26,"bush");tryPlace(52,29,"tree");tryPlace(51,22,"wood")
+  tryPlace(50,23,"tree");tryPlace(53,25,"bush");tryPlace(48,26,"bush");tryPlace(52,29,"tree");tryPlace(51,22,"mushroom")
   tryPlace(23,33,"tree");tryPlace(26,35,"bush");tryPlace(22,36,"bush");tryPlace(25,38,"tree");tryPlace(24,32,"mushroom")
-  tryPlace(51,34,"tree");tryPlace(49,36,"bush");tryPlace(53,38,"tree");tryPlace(51,39,"bush");tryPlace(50,33,"wood")
+  tryPlace(51,34,"tree");tryPlace(49,36,"bush");tryPlace(53,38,"tree");tryPlace(51,39,"bush");tryPlace(50,33,"mushroom")
   tryPlace(34,41,"tree");tryPlace(38,43,"bush");tryPlace(33,43,"bush");tryPlace(36,40,"mushroom")
-  tryPlace(6,20,"tree");tryPlace(10,21,"bush");tryPlace(13,20,"bush");tryPlace(8,19,"wood")
+  tryPlace(6,20,"tree");tryPlace(10,21,"bush");tryPlace(13,20,"bush");tryPlace(8,19,"mushroom")
   tryPlace(4,31,"tree");tryPlace(11,30,"bush");tryPlace(7,32,"bush");tryPlace(9,29,"mushroom")
   tryPlace(60,6,"tree");tryPlace(65,5,"tree");tryPlace(62,7,"bush");tryPlace(67,7,"bush");tryPlace(63,5,"wood")
-  tryPlace(58,16,"tree");tryPlace(66,15,"bush");tryPlace(64,17,"bush");tryPlace(60,15,"mushroom")
+  tryPlace(58,16,"tree");tryPlace(66,15,"bush");tryPlace(64,17,"bush");tryPlace(60,15,"wood")
   tryPlace(66,34,"tree");tryPlace(72,35,"tree");tryPlace(69,33,"bush");tryPlace(73,36,"bush");tryPlace(70,32,"wood")
-  tryPlace(66,45,"tree");tryPlace(71,46,"bush");tryPlace(68,47,"bush");tryPlace(69,45,"mushroom")
+  tryPlace(66,45,"tree");tryPlace(71,46,"bush");tryPlace(68,47,"bush");tryPlace(69,45,"wood")
   return nodes
 }
 function drawFoliage(ctx:CanvasRenderingContext2D,foliage:FoliageNode[],camX:number,camY:number,cw:number,ch:number,imgs:ImgMap,nearNode:FoliageNode|null){
@@ -984,11 +960,17 @@ function drawFoliage(ctx:CanvasRenderingContext2D,foliage:FoliageNode[],camX:num
   for(const n of sorted){
     const sx=Math.round(n.wx-camX),sy=Math.round(n.wy-camY)
     if(n.type==="mushroom"||n.type==="wood"){
-      const DW=20,DH=20
+      const DW=22,DH=22
       if(sx+DW/2<0||sx-DW/2>cw||sy<-DH||sy>ch+DH)continue
       if(n.hasFruit){
-        ctx.font="18px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
-        ctx.fillText(n.type==="mushroom"?"🍄":"🪵",sx,sy)
+        const biom=imgs["biomThings"]
+        if(biom){
+          const[bsx,bsy]=n.type==="mushroom"?MUSHROOM_SPRITE:WOOD_SPRITE
+          ctx.drawImage(biom,bsx,bsy,16,16,Math.round(sx-DW/2),Math.round(sy-DH/2),DW,DH)
+        }else{
+          ctx.font="18px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle"
+          ctx.fillText(n.type==="mushroom"?"🍄":"🪵",sx,sy)
+        }
       }else{
         ctx.fillStyle="rgba(90,70,40,0.35)";ctx.beginPath();ctx.ellipse(sx,sy+4,9,4,0,0,Math.PI*2);ctx.fill()
       }
@@ -1040,7 +1022,7 @@ function drawBuildings(ctx:CanvasRenderingContext2D,camX:number,camY:number,cw:n
       const ix=bx+(bw-dw)/2,iy=by+bh-dh
       ctx.save();ctx.beginPath();ctx.rect(bx,by,bw,bh);ctx.clip();ctx.drawImage(svgImg,ix,iy,dw,dh);ctx.restore()
     }
-    {
+    if(b.label.length>0){
       const fs=Math.min(13,TS*0.45)
       ctx.font=`bold ${fs}px sans-serif`;ctx.textAlign="center";ctx.textBaseline="middle"
       const cx2=bx+bw/2,lh=fs*1.4,labelY=by+bh+fs*0.9
@@ -1558,7 +1540,10 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
     dialogIdx: 0 as number,
     typeText: "" as string,
     typeChars: 0 as number,
-    blooLastLine: "" as string,
+    // In freeplay, skip every forced lesson stage but still leave Bloo with
+    // one friendly line the player can pull up on demand (via the existing
+    // "[Z] Ask Bloo to repeat that" recap prompt), so he isn't silent.
+    blooLastLine: (freeplay?"Have fun exploring! Come find me if you want a hand. 👋":"") as string,
     blooRecapOpen: false as boolean,
     completionCalled: false,
     foliage: initFoliage(),
@@ -1954,16 +1939,6 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
             s.dialogIdx++;if(s.dialogIdx>=L1_BLOO_TOUR.length){s.gameStage=L1_FORAGE;s.dialogIdx=0}
             consumeE()
           }
-          // 3. read a tour-stop sign
-          if(eDown&&!eUsed){
-            for(const stop of L1_TOUR_STOPS){
-              if(Math.hypot(s.px-stop.x,s.py-stop.y)<L1_TOUR_INTERACT){
-                s.notifText=stop.sign;s.notifTimer=280
-                consumeE()
-                break
-              }
-            }
-          }
           // 4. bloo sell intro
           if(eDown&&!eUsed&&nearBloo&&s.gameStage===L1_SELL_INTRO){
             s.dialogIdx++;if(s.dialogIdx>=L1_BLOO_SELL_INTRO.length){s.gameStage=L1_SELLING;s.dialogIdx=0}
@@ -2017,6 +1992,10 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
                 const hcy=fn.wy-foliageHitOY(fn.type)
                 const ddx=nx-fn.wx,ddy=ny-hcy,dist=Math.hypot(ddx,ddy)
                 const minD=PLAYER_R+hr
+                if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
+              }
+              for(const dn of MUSHROOMS){
+                const ddx=nx-dn.wx,ddy=ny-dn.wy,dist=Math.hypot(ddx,ddy),minD=PLAYER_R+AMBIENT_DECOR_HIT_R
                 if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
               }
               s.px=nx;s.py=ny
@@ -2126,6 +2105,10 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
                 const hr=foliageHitR(fn.type)
                 const hcy=fn.wy-foliageHitOY(fn.type)
                 const ddx=nx-fn.wx,ddy=ny-hcy,dist=Math.hypot(ddx,ddy),minD=PLAYER_R+hr
+                if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
+              }
+              for(const dn of MUSHROOMS){
+                const ddx=nx-dn.wx,ddy=ny-dn.wy,dist=Math.hypot(ddx,ddy),minD=PLAYER_R+AMBIENT_DECOR_HIT_R
                 if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
               }
               s.px=nx;s.py=ny
@@ -2239,6 +2222,10 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
                 const hr=foliageHitR(fn.type)
                 const hcy=fn.wy-foliageHitOY(fn.type)
                 const ddx=nx-fn.wx,ddy=ny-hcy,dist=Math.hypot(ddx,ddy),minD=PLAYER_R+hr
+                if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
+              }
+              for(const dn of MUSHROOMS){
+                const ddx=nx-dn.wx,ddy=ny-dn.wy,dist=Math.hypot(ddx,ddy),minD=PLAYER_R+AMBIENT_DECOR_HIT_R
                 if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
               }
               s.px=nx;s.py=ny
@@ -2355,6 +2342,10 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
                 const hr=foliageHitR(fn.type)
                 const hcy=fn.wy-foliageHitOY(fn.type)
                 const ddx=nx-fn.wx,ddy=ny-hcy,dist=Math.hypot(ddx,ddy),minD=PLAYER_R+hr
+                if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
+              }
+              for(const dn of MUSHROOMS){
+                const ddx=nx-dn.wx,ddy=ny-dn.wy,dist=Math.hypot(ddx,ddy),minD=PLAYER_R+AMBIENT_DECOR_HIT_R
                 if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
               }
               s.px=nx;s.py=ny
@@ -2550,6 +2541,10 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
                 const minD=PLAYER_R+hr
                 if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
               }
+              for(const dn of MUSHROOMS){
+                const ddx=nx-dn.wx,ddy=ny-dn.wy,dist=Math.hypot(ddx,ddy),minD=PLAYER_R+AMBIENT_DECOR_HIT_R
+                if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
+              }
               s.px=nx;s.py=ny
             }
           }
@@ -2695,6 +2690,10 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
                 const minD=PLAYER_R+hr
                 if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
               }
+              for(const dn of MUSHROOMS){
+                const ddx=nx-dn.wx,ddy=ny-dn.wy,dist=Math.hypot(ddx,ddy),minD=PLAYER_R+AMBIENT_DECOR_HIT_R
+                if(dist<minD&&dist>0){const push=(minD-dist)/dist;nx+=ddx*push;ny+=ddy*push}
+              }
               s.px=nx;s.py=ny
             }
           }
@@ -2768,9 +2767,6 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
 
         const npcMaxTrades=variant==="lesson1"?L1_NPC_MAX_TRADES:variant==="lessonInvest"?LIV_TRADES_NEEDED:LB_NPC_MAX_TRADES
         drawNpcs(ctx,s.npcs,camX,camY,npcMaxTrades)
-        if(variant==="lesson1"){
-          for(const stop of L1_TOUR_STOPS)drawTourStop(ctx,camX,camY,stop.x,stop.y,stop.label,stop.color,Math.hypot(s.px-stop.x,s.py-stop.y)<L1_TOUR_INTERACT)
-        }
         if(variant==="lessonFarm"){
           drawFarmPlot(ctx,camX,camY,s.farmState.rowsPlanted,s.farmState.rowsHarvested,s.farmState.plotUnlocked,imgs)
           if(s.gameStage<=FARM_RESOLVE_CLEARING)drawBink(ctx,camX,camY,s.gameStage===FARM_RESOLVE_CLEARING&&s.farmChosenRoute==="weeder"&&Math.hypot(s.px-FARM_BINK_X,s.py-FARM_BINK_Y)<FARM_INTERACT)
@@ -2806,7 +2802,7 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
         if(variant==="lesson1"){
           if(s.gameStage===L1_INTRO)taskLabel="📍 Talk to Bloo, your guide"
           else if(s.gameStage===L1_HARVEST)taskLabel=":berry: Harvest [Z] then eat [X] a berry"
-          else if(s.gameStage===L1_TOUR)taskLabel="💬 Talk to Bloo about the town"
+          else if(s.gameStage===L1_TOUR)taskLabel="💬 Talk to Bloo"
           else if(s.gameStage===L1_FORAGE)taskLabel=`🧺 Collect ${L1_FORAGE_GOAL} items (${combinedGoods(s.inventory)}/${L1_FORAGE_GOAL})`
           else if(s.gameStage===L1_SELL_INTRO)taskLabel="💬 Talk to Bloo at the Market"
           else if(s.gameStage===L1_SELLING)taskLabel=`🪙 Sell everything [Z] — ${combinedGoods(s.inventory)} item${combinedGoods(s.inventory)===1?"":"s"} left`
@@ -2961,12 +2957,8 @@ export function GameMap({ variant, initialCoins = 0, playerColor = "#ef4444", pa
               const d=Math.hypot(s.px-s.npcs[i].x,s.py-s.npcs[i].y)
               if(d<TS*2.5&&d<nDist){nDist=d;nearNpcForPrompt=i}
             }
-            let nearTourStop:typeof L1_TOUR_STOPS[number]|null=null
-            for(const stop of L1_TOUR_STOPS)if(Math.hypot(s.px-stop.x,s.py-stop.y)<L1_TOUR_INTERACT){nearTourStop=stop;break}
             if(nearBloo&&s.blooLastLine){
               drawPrompt(ctx,cw,ch,"[Z] Ask Bloo to repeat that","#1e40af")
-            }else if(nearTourStop){
-              drawPrompt(ctx,cw,ch,`[Z] Read the ${nearTourStop.label} sign`,nearTourStop.color)
             }else if(nearNpcForPrompt>=0&&s.gameStage===L1_SELLING){
               const npc=s.npcs[nearNpcForPrompt]
               let msg:string

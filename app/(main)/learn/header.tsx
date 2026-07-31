@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Map } from "lucide-react"
+import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
 
 type Props = {
@@ -17,12 +17,7 @@ export const Header = ({ title }: Props) => {
             <h1 className="font-bold text-lg">
                 {title}
             </h1>
-            <Link href="/map">
-                <Button variant="defaultOutline" size="sm">
-                    <Map className="h-4 w-4 mr-1" />
-                    Map
-                </Button>
-            </Link>
+            <div className="w-9" />
         </div>
     )
 }
