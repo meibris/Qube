@@ -1,6 +1,9 @@
 import type { MetadataRoute } from "next";
 
-const baseUrl = "https://playqube.org";
+// Must match the canonical www host (see metadataBase in app/layout.tsx) —
+// the apex domain 308-redirects here, and a sitemap URL that redirects
+// gets flagged by Google as a "Redirect error" instead of being indexed.
+const baseUrl = "https://www.playqube.org";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   // Only the marketing homepage is public, every other route is behind
